@@ -23,6 +23,7 @@ class AppState:
     signer: TokenSigner
     settings: Settings = field(default_factory=lambda: default_settings)
     people: dict[str, str] = field(default_factory=dict)  # persona key -> person_id
+    console_demo_store: SqliteStore | None = None
 
 
 def build_state(db_path: str = ":memory:", settings: Settings | None = None) -> AppState:
@@ -31,4 +32,12 @@ def build_state(db_path: str = ":memory:", settings: Settings | None = None) -> 
     store = SqliteStore(db_path, check_same_thread=False)
     people = seed_all(store)
     signer = TokenSigner(secret=cfg.session_token_secret or None, ttl_s=cfg.session_token_ttl_s)
-    return AppState(store=store, signer=signer, settings=cfg, people=people)
+    demo_store = None
+    if cfg.console_demo_enabled:
+        demo_store = SqliteStore(check_same_thread=False)
+        demo_people = seed_all(demo_store)
+        demo_store.set_console_user("judge-demo", "Judge demo", "therapist")
+        for pid in demo_people.values():
+            demo_store.link_console_user("judge-demo", pid)
+    return AppState(store=store, signer=signer, settings=cfg, people=people,
+                    console_demo_store=demo_store)

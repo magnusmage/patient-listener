@@ -8,8 +8,10 @@ in ``attempts`` (FR-23); only word ids, numbers and timestamps.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
+import secrets
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -41,6 +43,15 @@ CREATE TABLE IF NOT EXISTS consents (person_id TEXT, kind TEXT, granted INTEGER,
     PRIMARY KEY (person_id, kind));
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT, action TEXT, detail TEXT, at TEXT
+);
+CREATE TABLE IF NOT EXISTS console_users (
+    id TEXT PRIMARY KEY, display_name TEXT NOT NULL, role TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS console_links (
+    user_id TEXT NOT NULL, person_id TEXT NOT NULL, PRIMARY KEY (user_id, person_id)
+);
+CREATE TABLE IF NOT EXISTS console_tokens (
+    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL
 );
 """
 
@@ -89,6 +100,91 @@ class SqliteStore:
         return [dict(r) for r in self._db.execute("SELECT * FROM audit ORDER BY id")]
 
     # --- people ---------------------------------------------------------------
+
+    def person_exists(self, person_id: str) -> bool:
+        return self._db.execute("SELECT 1 FROM people WHERE id=?", (person_id,)).fetchone() is not None
+
+    # Provisioning is a trusted local/admin operation, never a public API.
+    def set_console_user(self, user_id: str, display_name: str, role: str) -> None:
+        if not user_id or role not in {"therapist", "carer", "agent", "patient"}:
+            raise ValueError("invalid console identity")
+        self._db.execute(
+            "INSERT INTO console_users(id, display_name, role) VALUES (?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, role=excluded.role",
+            (user_id, display_name, role),
+        )
+        self._db.execute("DELETE FROM console_tokens WHERE user_id=?", (user_id,))
+        self._db.commit()
+
+    def link_console_user(self, user_id: str, person_id: str) -> None:
+        if not self.person_exists(person_id) or not self._db.execute(
+            "SELECT 1 FROM console_users WHERE id=?", (user_id,)
+        ).fetchone():
+            raise KeyError("unknown user or person")
+        self._db.execute(
+            "INSERT OR IGNORE INTO console_links(user_id, person_id) VALUES (?,?)",
+            (user_id, person_id),
+        )
+        self._db.commit()
+
+    def issue_console_token(self, user_id: str, ttl_s: int = 28800, *, demo: bool = False) -> str:
+        if ttl_s <= 0:
+            raise ValueError("token lifetime must be positive")
+        if not self._db.execute("SELECT 1 FROM console_users WHERE id=?", (user_id,)).fetchone():
+            raise KeyError(user_id)
+        token = ("pldemo_" if demo else "plconsole_") + secrets.token_urlsafe(32)
+        expires = (datetime.now(timezone.utc) + timedelta(seconds=ttl_s)).isoformat()
+        self._db.execute(
+            "INSERT INTO console_tokens(token_hash, user_id, expires_at) VALUES (?,?,?)",
+            (hashlib.sha256(token.encode()).hexdigest(), user_id, expires),
+        )
+        self._db.commit()
+        return token
+
+    def console_user_for_token(self, token: str) -> Optional[dict]:
+        row = self._db.execute(
+            "SELECT u.id, u.display_name, u.role FROM console_users u "
+            "JOIN console_tokens t ON t.user_id=u.id WHERE t.token_hash=? AND t.expires_at>?",
+            (hashlib.sha256(token.encode()).hexdigest(), _now()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def revoke_console_tokens(self, user_id: str) -> None:
+        self._db.execute("DELETE FROM console_tokens WHERE user_id=?", (user_id,))
+        self._db.commit()
+
+    def revoke_console_token(self, token: str) -> None:
+        self._db.execute("DELETE FROM console_tokens WHERE token_hash=?",
+                         (hashlib.sha256(token.encode()).hexdigest(),))
+        self._db.commit()
+
+    def linked_people(self, user_id: str) -> list[str]:
+        return [r["person_id"] for r in self._db.execute(
+            "SELECT l.person_id FROM console_links l JOIN people p ON p.id=l.person_id "
+            "WHERE l.user_id=? ORDER BY l.person_id", (user_id,)
+        )]
+
+    def has_linked_therapist(self, person_id: str) -> bool:
+        return self._db.execute(
+            "SELECT 1 FROM console_links l JOIN console_users u ON u.id=l.user_id "
+            "WHERE l.person_id=? AND u.role='therapist' LIMIT 1", (person_id,)
+        ).fetchone() is not None
+
+    def console_approve_word(self, person_id: str, word_id: str, actor: str) -> WordEntry:
+        """Approval boundary: ownership, patient link and role are checked before mutation."""
+        user = self._db.execute("SELECT role FROM console_users WHERE id=?", (actor,)).fetchone()
+        if not user or person_id not in self.linked_people(actor):
+            raise PermissionError("patient access denied")
+        if user["role"] != "therapist" and not (
+            user["role"] == "carer" and not self.has_linked_therapist(person_id)
+        ):
+            raise PermissionError("only the linked therapist, or carer without a therapist, can approve")
+        row = self._db.execute(
+            "SELECT * FROM words WHERE id=? AND person_id=?", (word_id, person_id)
+        ).fetchone()
+        if row is None:
+            raise KeyError(word_id)
+        return self.approve_word(word_id, by=actor)
 
     def add_person(self, person_id: str, first_name: str, needs: frozenset[Need]) -> None:
         self._db.execute(
@@ -339,7 +435,7 @@ class SqliteStore:
     def delete_all(self, person_id: str) -> dict:
         """Delete everything for one person; completes immediately here (<= 24 h in prod)."""
         counts = {}
-        for table in ("words", "attempts", "cards", "plans", "consents", "people"):
+        for table in ("words", "attempts", "cards", "plans", "consents", "console_links", "people"):
             col = "id" if table == "people" else "person_id"
             cur = self._db.execute(f"DELETE FROM {table} WHERE {col}=?", (person_id,))
             counts[table] = cur.rowcount

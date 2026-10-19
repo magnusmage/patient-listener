@@ -8,14 +8,18 @@ allowed to make: approving a word draft (FR-40 - a therapist, never the agent).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
-from ..types import Need, Outcome, WordStatus
+from ..types import Need, Outcome
+from .console_auth import ConsoleAccess, console_access
 
 __all__ = ["router"]
 
 router = APIRouter(prefix="/api/console", tags=["console"])
+Access = Annotated[ConsoleAccess, Depends(console_access)]
 
 _NEED_LABEL = {
     Need.FINDING_WORDS: "Finding the word",
@@ -31,14 +35,35 @@ def _state(request: Request):
     return request.app.state.pl
 
 
-def _resolve(request: Request, person: str) -> str:
+def _resolve(request: Request, person: str, access: ConsoleAccess) -> str:
     """Accept either a persona key ('margaret') or a full person id ('demo-margaret')."""
     state = _state(request)
-    if person in state.people:
-        return state.people[person]
-    if person in state.people.values():
-        return person
-    raise HTTPException(status_code=404, detail=f"unknown person: {person}")
+    pid = state.people.get(person, person)
+    if pid not in access.store.linked_people(access.user_id):
+        raise HTTPException(status_code=404, detail="Person not found")
+    return pid
+
+
+@router.get("/me")
+async def me(access: Access) -> dict:
+    return {"id": access.user_id, "name": access.display_name,
+            "role": access.role, "demo": access.demo}
+
+
+@router.post("/logout")
+async def logout(request: Request, access: Access) -> dict:
+    token = request.headers["authorization"].partition(" ")[2]
+    access.store.revoke_console_token(token)
+    return {"ok": True}
+
+
+@router.post("/demo/session")
+async def demo_session(request: Request) -> JSONResponse:
+    store = _state(request).console_demo_store
+    if store is None:
+        raise HTTPException(404, "Demo console is disabled")
+    token = store.issue_console_token("judge-demo", ttl_s=3600, demo=True)
+    return JSONResponse({"token": token, "demo": True}, headers={"Cache-Control": "no-store"})
 
 
 def _word_dict(w) -> dict:  # noqa: ANN001 - WordEntry
@@ -65,35 +90,39 @@ def _last_seen(store, pid: str) -> str:  # noqa: ANN001
 
 
 @router.get("/caseload")
-async def caseload(request: Request) -> dict:
+async def caseload(request: Request, access: Access) -> dict:
     state = _state(request)
-    store = state.store
+    store = access.store
+    aliases = {pid: key for key, pid in state.people.items()}
     out = []
-    for key, pid in state.people.items():
+    for pid in store.linked_people(access.user_id):
         needs = store.person_needs(pid)
         out.append(
             {
-                "id": key,
+                "id": aliases.get(pid, pid),
                 "name": store.person_name(pid),
                 "needs": [_NEED_LABEL.get(n, n.value) for n in needs],
                 "last": _last_seen(store, pid),
                 "returned": store.count_found_without_hint(pid, since_days=30),
+                "canApprove": access.role == "therapist" or not store.has_linked_therapist(pid),
             }
         )
-    return {"therapist": {"name": "Sam (SLT)"}, "caseload": out}
+    return {"therapist": {"name": access.display_name}, "caseload": out}
 
 
 @router.get("/words/{person}")
-async def words(request: Request, person: str) -> dict:
-    store = _state(request).store
-    pid = _resolve(request, person)
+async def words(request: Request, person: str, access: Access) -> dict:
+    store = access.store
+    pid = _resolve(request, person, access)
     return {"person": person, "words": [_word_dict(w) for w in store.all_words(pid)]}
 
 
 @router.get("/grid/{person}")
-async def grid(request: Request, person: str) -> dict:
-    store = _state(request).store
-    pid = _resolve(request, person)
+async def grid(request: Request, person: str, access: Access) -> dict:
+    store = access.store
+    pid = _resolve(request, person, access)
+    if access.role != "therapist":
+        raise HTTPException(403, "Detailed progress is only available to the linked therapist")
     today = datetime.now(timezone.utc).date()
     days = [(today - timedelta(days=4 - i)) for i in range(5)]
     labels = [d.strftime("%a") for d in days]
@@ -126,9 +155,9 @@ def _cell_code(row: dict) -> str:
 
 
 @router.get("/settings/{person}")
-async def settings(request: Request, person: str) -> dict:
-    store = _state(request).store
-    pid = _resolve(request, person)
+async def settings(request: Request, person: str, access: Access) -> dict:
+    store = access.store
+    pid = _resolve(request, person, access)
     from ..voice.merge import merge
 
     cfg = merge(store.person_needs(pid))
@@ -142,9 +171,9 @@ async def settings(request: Request, person: str) -> dict:
 
 
 @router.get("/consent/{person}")
-async def consent(request: Request, person: str) -> dict:
-    store = _state(request).store
-    pid = _resolve(request, person)
+async def consent(request: Request, person: str, access: Access) -> dict:
+    store = access.store
+    pid = _resolve(request, person, access)
     return {
         "person": person,
         "tellCarerLowMood": store.has_consent(pid, "tell_carer_low_mood"),
@@ -153,11 +182,13 @@ async def consent(request: Request, person: str) -> dict:
 
 
 @router.post("/words/{person}/{word_id}/approve")
-async def approve(request: Request, person: str, word_id: str) -> dict:
-    store = _state(request).store
-    _resolve(request, person)  # validate person
+async def approve(request: Request, person: str, word_id: str, access: Access) -> dict:
+    store = access.store
+    pid = _resolve(request, person, access)
     try:
-        w = store.approve_word(word_id, by="slt")
+        w = store.console_approve_word(pid, word_id, actor=access.user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown word: {word_id}")
+        raise HTTPException(status_code=404, detail="Word not found")
     return {"ok": True, "word": _word_dict(w)}

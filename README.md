@@ -71,7 +71,7 @@ cd web && python -m http.server 8000
 #   http://localhost:8000/index.html      the patient app (demo mode)
 #   http://localhost:8000/index.html?mode=judge   + the J1 live trace
 #   http://localhost:8000/specimen.html    the design-system specimen (toggle theme, zoom to 200%)
-#   http://localhost:8000/console.html?mode=judge  the therapist console (no-MFA demo login)
+#   http://localhost:8000/console.html?mock=1&mode=judge  browser-only sample console
 ```
 
 `web/demo.html` is a single self-contained file (CSS + JS inlined, a web font linked) — open it
@@ -101,9 +101,67 @@ http://localhost:8000/?demo=1               force the in-browser replay instead
 http://localhost:8000/console.html          the therapist console, backed by the real store
 ```
 
+### Console sign-in and patient access
+
+The console API requires an individual access token. Its role and patient links are stored on
+the server; URL parameters and browser controls cannot grant access. Tokens expire after eight
+hours by default and only their hashes are stored. This implements access-token sign-in;
+the workbook's passkey/MFA login is not implemented yet. Use HTTPS when deployed.
+
+On Windows PowerShell, start the app with a persistent database (from the repository root,
+with the virtual environment activated):
+
+```powershell
+$env:PL_DB_PATH = "pl.db"
+patient-listener-server
+```
+
+In a second activated terminal in the same folder, provision one therapist and their linked
+demo patient. This is a trusted administrator operation, not a public registration endpoint:
+
+```powershell
+python -m patient_listener.tools.console_access --db pl.db grant --user sam --name "Sam (SLT)" --role therapist --person demo-margaret
+```
+
+Enter the printed token at `http://localhost:8000/console.html`. Repeat `--person` for additional
+patient IDs. Use `--role carer` for a carer. Carers see linked patients and counts, but not the
+therapist's detailed grid; they can approve drafts only if no therapist is linked to the person.
+Running `grant` for an existing user invalidates their previous tokens and retains existing
+patient links. `--hours` controls expiry. To revoke all their tokens immediately:
+
+```powershell
+python -m patient_listener.tools.console_access --db pl.db revoke --user sam
+```
+
+The browser keeps the token only in memory and sends it as an Authorization header. Sign-out
+revokes that token; reloading requires signing in again. A rejected approval stays a draft,
+and live API errors never silently switch the console to mock data.
+
+For an unrestricted **sample-data-only** judge console, explicitly enable the demo before
+starting the server:
+
+```powershell
+$env:CONSOLE_DEMO_ENABLED = "true"
+patient-listener-server
+```
+
+Open `http://localhost:8000/console.html?mode=judge` and choose **Enter judge demo**. The demo
+uses a separate in-memory store containing only the three seeded personas. Demo credentials
+cannot read or modify the main database, even when word IDs match. `?mode=judge` alone does
+not enable server access. `?mock=1` (or opening the HTML from disk) uses browser-only sample
+data and grants no API access. Environment values must be exported by the shell/launcher;
+the application does not automatically load `.env`.
+
+To run the console access regression checks:
+
+```powershell
+python run_tests.py
+node --test tests/console_auth_web.test.cjs
+```
+
 The patient app auto-selects **server mode** when served over http (it fetches
-`GET /api/session`, opens the WebSocket, and keeps the on-screen controls as mic stand-ins); it
-falls back to offline **demo mode** when opened from `file://`. The console reads
+`GET /api/session`, opens the WebSocket, and keeps the on-screen controls as mic stand-ins). The app falls back to offline **demo mode** when opened from `file://`.
+The console reads
 `GET /api/console/*` and falls back to its mock data offline (`?mock=1` forces the mock).
 The three demo personas (Margaret · finding words, Daniyal · getting words started, Joseph ·
 being heard) are seeded on startup.

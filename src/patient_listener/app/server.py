@@ -20,6 +20,8 @@ from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..config import Settings, settings as default_settings
+
 from .console_api import router as console_router
 from .deps import build_state
 from .session import AppSession
@@ -36,24 +38,39 @@ def _web_dir() -> Path:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    app.state.pl = build_state(db_path=os.environ.get("PL_DB_PATH", ":memory:"))
+    app.state.pl = build_state(db_path=os.environ.get("PL_DB_PATH", ":memory:"),
+                               settings=app.state.settings)
     try:
         yield
     finally:
         app.state.pl.store.close()
+        if app.state.pl.console_demo_store is not None:
+            app.state.pl.console_demo_store.close()
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Patient Listener", lifespan=_lifespan)
+    app.state.settings = settings or default_settings
     app.include_router(console_router)
 
+    @app.middleware("http")
+    async def private_api_no_cache(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/api/console/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/api/session")
-    async def session_token(request: Request, person: str = Query("margaret")) -> JSONResponse:
+    async def session_token(
+        request: Request, person: str = Query("margaret")
+    ) -> JSONResponse:
         state = request.app.state.pl
         pid = state.people.get(person, person)
         if pid not in state.people.values():
             return JSONResponse({"error": f"unknown person: {person}"}, status_code=404)
         token = state.signer.issue(pid)
+        except ValueError:
+            return JSONResponse({"error": "A valid device identifier is required"}, status_code=400)
         scheme = "wss" if request.url.scheme == "https" else "ws"
         host = request.headers.get("host", "localhost:8000")
         needs = sorted(n.value for n in state.store.person_needs(pid))

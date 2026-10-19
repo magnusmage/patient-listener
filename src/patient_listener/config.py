@@ -50,6 +50,7 @@ class Settings:
     # secret, fine for dev; set a stable value on the deploy box). The ONLY place it is read.
     session_token_secret: str = os.environ.get("SESSION_TOKEN_SECRET", "")
     session_token_ttl_s: int = int(os.environ.get("SESSION_TOKEN_TTL_S", "900"))
+    console_demo_enabled: bool = _b("CONSOLE_DEMO_ENABLED", False)
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")  # sandbox only
     phoenix_collector_endpoint: str = os.environ.get(
         "PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006"

@@ -12,9 +12,12 @@
   <main id="root" class="pl-app pl-console" role="main"></main>
 
   <script>
-  // Mock data (offline). In production these come from the app API (GET /console/...).
+  // Mock data is only used when explicitly opening the offline demo.
+  const QUERY = new URLSearchParams(location.search);
+  const API = (location.protocol.startsWith('http') && QUERY.get('mock') !== '1') ? '' : null;
+  let accessToken = ''; // Memory only: never URLs, localStorage or sessionStorage.
   const DATA = {
-    therapist: { name: 'Sam (SLT)', mfa: new URLSearchParams(location.search).get('mode') === 'judge' ? false : true },
+    therapist: { name: 'Sam (SLT)' },
     caseload: [
       { id: 'margaret', name: 'Margaret', needs: ['Finding the word'], last: 'Today', returned: 9 },
       { id: 'daniyal', name: 'Daniyal', needs: ['Getting words started'], last: 'Yesterday', returned: 5 },
@@ -42,7 +45,11 @@
   const CELL = { check: ['✓', 'pl-cell--check', 'found with no hint'], meaning: ['M', 'pl-cell--hint', 'found after meaning hint'], sound: ['S', 'pl-cell--hint', 'found after sound hint'], word: ['W', 'pl-cell--hint', 'found after hearing the word'], none: ['–', 'pl-cell--none', 'not tried'] };
 
   const root = document.getElementById('root');
-  const S = { signedIn: false, tab: 'T2', person: 'margaret' };
+  const S = { signedIn: false, tab: 'T2', person: 'margaret', role: 'therapist', demo: API == null, error: '', busy: false };
+  function clearData() {
+    DATA.caseload = []; DATA.words = {}; DATA.grid = {}; DATA.settings = {}; DATA.consent = {};
+  }
+  if (API != null) clearData();
 
   function h(tag, attrs, ...kids) {
     const e = document.createElement(tag);
@@ -54,17 +61,20 @@
   function render() {
     root.innerHTML = '';
     if (!S.signedIn) return root.append(t1());
-    root.append(
-      h('div', { class: 'pl-topbar' }, h('div', { class: 'pl-topbar__title' }, 'Patient Listener — console'), h('span', { class: 'pl-muted' }, DATA.therapist.name)),
+    root.append(...[
+      h('div', { class: 'pl-topbar' }, h('div', { class: 'pl-topbar__title' }, 'Patient Listener — console'), h('span', { class: 'pl-muted' }, DATA.therapist.name),
+        h('button', { class: 'pl-tab', onclick: signOut }, 'Sign out')),
+      S.demo ? h('p', { class: 'pl-muted' }, 'Demo data only — changes do not affect patient records.') : null,
+      S.error ? h('p', { role: 'alert' }, S.error) : null,
       tabs(),
       ({ T2: t2, T3: t3, T4: t4, T5: t5, T6: t6 }[S.tab])(),
-    );
+    ].filter(Boolean));
   }
 
   function tabs() {
     const items = [['T2', 'Caseload'], ['T3', 'Word list'], ['T4', 'Progress'], ['T5', 'Profile & hints'], ['T6', 'Consent & export']];
     const row = h('div', { class: 'pl-tabs', role: 'tablist' });
-    items.forEach(([id, label]) => row.append(h('button', { class: 'pl-tab', role: 'tab', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, label)));
+    items.filter(([id]) => id !== 'T4' || S.role === 'therapist').forEach(([id, label]) => row.append(h('button', { class: 'pl-tab', role: 'tab', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, label)));
     return row;
   }
 
@@ -72,8 +82,11 @@
   function t1() {
     const wrap = h('div', { class: 'pl-screen pl-screen--center' },
       h('h1', { class: 'pl-prompt' }, 'Sign in'),
-      h('p', { class: 'pl-muted' }, DATA.therapist.mfa ? 'Use your passkey, then the code from your authenticator.' : 'Demo login for judges — no passkey needed.'),
-      h('button', { class: 'pl-btn pl-btn--primary', style: 'max-width:360px', 'data-autofocus': '', onclick: () => { S.signedIn = true; render(); } }, DATA.therapist.mfa ? 'Sign in with passkey' : 'Enter demo console'),
+      h('p', { class: 'pl-muted' }, API == null ? 'Offline demo — sample data only.' : 'Enter the access token provided by your administrator.'),
+      API != null ? h('input', { id: 'access-token', type: 'password', 'aria-label': 'Console access token', autocomplete: 'off', spellcheck: 'false' }) : null,
+      S.error ? h('p', { role: 'alert' }, S.error) : null,
+      h('button', { class: 'pl-btn pl-btn--primary', style: 'max-width:360px', 'data-autofocus': '', disabled: S.busy ? '' : null, onclick: () => signIn(false) }, API == null ? 'Enter offline demo' : 'Sign in'),
+      API != null && QUERY.get('mode') === 'judge' ? h('button', { class: 'pl-btn pl-btn--secondary', disabled: S.busy ? '' : null, onclick: () => signIn(true) }, 'Enter judge demo') : null,
     );
     setTimeout(() => { const b = wrap.querySelector('button'); if (b) b.focus(); }, 0);
     return wrap;
@@ -103,7 +116,9 @@
           w.status === 'draft'
             ? h('span', { class: 'pl-pill' },
                 h('span', { class: 'pl-locked', style: 'margin-right:8px;align-self:center' }, `draft from ${w.by}`),
-                h('button', { onclick: () => approveWord(w) }, '✓ Approve'))
+                (DATA.caseload.find(p => p.id === S.person)?.canApprove !== false)
+                  ? h('button', { onclick: () => approveWord(w) }, '✓ Approve')
+                  : h('span', { class: 'pl-muted' }, 'Therapist approval required'))
             : h('span', { class: 'pl-cell pl-cell--check' }, '✓ live')),
         h('label', { class: 'pl-muted', style: 'display:block;margin-top:8px' }, 'Meaning cue (never shown to the person as the word):'),
         h('input', { value: w.cue, 'aria-label': `Meaning cue for ${w.text}`, oninput: (e) => { w.cue = e.target.value; }, style: 'width:100%;min-height:44px;font-size:18px;padding:0 12px;border:2px solid var(--pl-line);border-radius:10px;background:var(--pl-surface);color:var(--pl-text)' }),
@@ -186,45 +201,84 @@
   /* Live data from the app server's console API (GET /api/console/...). When opened from disk
    * (file://) or with ?mock=1, the mock DATA above is used instead, so the console still works
    * offline. */
-  const API = (location.protocol.startsWith('http') && new URLSearchParams(location.search).get('mock') !== '1') ? '' : null;
+  async function api(path, options = {}) {
+    const headers = { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` };
+    const response = await fetch(`${API}/api/console/${path}`, { ...options, headers, cache: 'no-store' });
+    if (!response.ok) {
+      if (response.status === 401) {
+        accessToken = ''; S.signedIn = false; clearData();
+      }
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || 'Could not complete the request. Please try again.');
+    }
+    return response.json();
+  }
+
+  async function signIn(demo) {
+    if (API == null) { S.signedIn = true; S.error = ''; render(); return; }
+    const input = document.getElementById('access-token');
+    accessToken = demo ? '' : input.value.trim();
+    if (input) input.value = '';
+    S.busy = true; S.error = ''; render();
+    try {
+      if (demo) {
+        const response = await fetch(`${API}/api/console/demo/session`, { method: 'POST', cache: 'no-store' });
+        if (!response.ok) throw new Error('Judge demo is unavailable on this server.');
+        accessToken = (await response.json()).token;
+      }
+      const user = await api('me');
+      S.role = user.role; S.demo = user.demo;
+      await hydrate();
+      S.signedIn = true; S.tab = 'T2';
+    } catch (error) {
+      accessToken = ''; S.signedIn = false; clearData(); S.error = error.message;
+    } finally { S.busy = false; render(); }
+  }
+
+  async function signOut() {
+    try { if (API != null) await api('logout', { method: 'POST' }); }
+    catch (error) { /* Local credentials are discarded even if the server is unreachable. */ }
+    accessToken = ''; S.signedIn = false; S.error = '';
+    if (API != null) clearData();
+    render();
+  }
 
   async function approveWord(w) {
     if (API != null) {
       try {
-        const r = await fetch(`${API}/api/console/words/${S.person}/${w.id}/approve`, { method: 'POST' });
-        if (r.ok) { w.status = 'approved'; render(); return; }
-      } catch (e) { /* fall through to local update */ }
+        const result = await api(`words/${encodeURIComponent(S.person)}/${encodeURIComponent(w.id)}/approve`, { method: 'POST' });
+        Object.assign(w, result.word); S.error = ''; render();
+      } catch (error) { S.error = error.message; render(); }
+      return;
     }
     w.status = 'approved'; render();
   }
 
   async function hydrate() {
     if (API == null) return;  // file:// or ?mock=1 -> keep the mock DATA
-    try {
-      const cl = await (await fetch(`${API}/api/console/caseload`)).json();
+      const cl = await api('caseload');
       DATA.therapist.name = cl.therapist.name;
       DATA.caseload = cl.caseload;
+      S.person = cl.caseload[0]?.id || '';
       await Promise.all(cl.caseload.map(async (p) => {
+        const person = encodeURIComponent(p.id);
         const [w, g, s, c] = await Promise.all([
-          fetch(`${API}/api/console/words/${p.id}`).then(r => r.json()),
-          fetch(`${API}/api/console/grid/${p.id}`).then(r => r.json()),
-          fetch(`${API}/api/console/settings/${p.id}`).then(r => r.json()),
-          fetch(`${API}/api/console/consent/${p.id}`).then(r => r.json()),
+          api(`words/${person}`),
+          S.role === 'therapist' ? api(`grid/${person}`) : Promise.resolve({ days: [], rows: [] }),
+          api(`settings/${person}`),
+          api(`consent/${person}`),
         ]);
         DATA.words[p.id] = w.words;
         DATA.grid[p.id] = { days: g.days, rows: g.rows };
         DATA.settings[p.id] = { needs: s.needs, hintOrder: s.hintOrder, hintWait: s.hintWait, sessionMin: s.sessionMin };
         DATA.consent[p.id] = { tellCarerLowMood: c.tellCarerLowMood, dataSharing: c.dataSharing };
       }));
-      render();
-    } catch (e) { /* server down -> keep whatever mock DATA we have */ }
   }
 
   const order = { system: 'light', light: 'dark', dark: 'system' };
   document.getElementById('theme').addEventListener('click', () => { const cur = document.documentElement.getAttribute('data-theme') || 'system'; const n = order[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n); });
 
   render();
-  hydrate();
   </script>
 </body>
 </html>
