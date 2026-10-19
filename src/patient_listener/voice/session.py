@@ -140,6 +140,9 @@ class SessionEngine:
     # --- event feed -----------------------------------------------------------
 
     def feed(self, event: tuple) -> list[Action]:
+        # Safety is terminal for this engine; a new session needs a new engine.
+        if self.controller.state == State.SAFETY_STOP:
+            return []
         kind = event[0]
         now = event[-1] if isinstance(event[-1], (int, float)) else 0.0
 
@@ -176,13 +179,15 @@ class SessionEngine:
             if sig is not None:
                 self.safety_card = sig.card
                 self.controller.state = State.SAFETY_STOP
+                self.controller.pending = None
+                self.controller.silence_started = None
+                self.person_speaking = False
                 if sig.kind == safetymod.SafetyKind.STROKE:
                     self.carer_alerted = True
                 if sig.kind == safetymod.SafetyKind.DISTRESS and self.store.has_consent(
                     self.person_id, "tell_carer_low_mood"
                 ):
                     self.carer_alerted = True
-                act = safetymod.SafetySignal(sig.kind, sig.card, sig.pause_loudness)
                 from .actions import SafetyStop
 
                 self.log.append(SafetyStop(sig.card))

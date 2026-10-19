@@ -54,7 +54,11 @@
             : mode === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
             : new window.PLClient.DemoEngine();
     if (mode !== 'audio') c.setProfile([...state.needs][0] || 'finding_words');
-    const on = (type, fn) => c.addEventListener(type, (e) => { trace(type, e.detail); fn(e.detail); });
+    const on = (type, fn) => c.addEventListener(type, (e) => {
+      if (c !== client) return;
+      if (state.ended && state.ended.reason === 'safety' && type !== 'ended') return;
+      trace(type, e.detail); fn(e.detail);
+    });
 
     on('greeting', (d) => { pushCaption('listener', d.caption); });
     on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
@@ -70,8 +74,17 @@
     on('moveOn', () => { pushCaption('listener', "Let's try another."); });
     on('restOffer', () => { show('REST'); });
     on('checkComplete', () => { /* keep waiting quietly (Getting words out) */ });
-    on('safety', (d) => { state.safety = d; show('P8'); });
-    on('ended', (d) => { state.ended = d; show('END'); });
+    on('safety', (d) => {
+      state.safety = d;
+      state.ended = { reason: 'safety', found: state.today.slice() };
+      // Stop timers, close the transport and release the microphone before showing the card.
+      c.stop('safety');
+      show('P8');
+    });
+    on('ended', (d) => {
+      if (state.ended && state.ended.reason === 'safety') return;
+      state.ended = d; show('END');
+    });
     on('attempt', () => {});
     return c;
   }
@@ -99,13 +112,13 @@
   }
 
   // ---- routing ----
-  function show(route) { state.route = route; render(); }
+  function show(route) { if (state.safety && route !== 'P8') return; state.route = route; render(); }
 
   function render() {
     root.innerHTML = '';
     const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
     app.append(themeToggle());
-    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, REST: screenRest, END: screenEnd, P9: screenP9 };
+    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9 };
     (screens[state.route] || screenP0)(app);
     root.append(app);
     if (state.route === 'P8' && state.safety) overlaySafety();
@@ -190,6 +203,7 @@
 
   async function beginSession() {
     if (!client) client = makeClient();
+    state.ended = null;
     state.captions = []; state.today = [];
     if (remote) {
       try { await client.start(); }
@@ -365,7 +379,7 @@
       h('h2', { id: 'pl-safety-title', class: 'pl-safety__title' }, s.title),
       h('p', { id: 'pl-safety-body', class: 'pl-safety__body' }, s.body),
       s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, `📞 Call ${s.number}`) : null,
-      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: () => { state.safety = null; render(); } }, "I'm OK, close"),
+      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: dismissSafety }, 'Close card'),
     );
     backdrop.append(dlg);
     root.append(backdrop);
@@ -373,7 +387,13 @@
     // Speak the safety line once (assistive).
     try { if (window.speechSynthesis && s.card === 'stroke_signs') { const u = new SpeechSynthesisUtterance(`${s.title}. ${s.body}`); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } } catch (e) {}
     // Minimal focus trap.
-    backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { state.safety = null; render(); } });
+    backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') dismissSafety(); });
+  }
+
+  function dismissSafety() {
+    state.safety = null;
+    client = null; // Further practice must create a fresh session explicitly.
+    show('END');
   }
 
   // ---- P9: states ----

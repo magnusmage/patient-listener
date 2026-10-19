@@ -21,7 +21,7 @@ from ..ports import Llm
 from ..store.sqlite_store import SqliteStore
 from ..types import Feedback, Need, State
 from ..voice import safety as safetymod
-from ..voice.actions import EndTurn, MoveOn, OfferRest, Praise, Stop
+from ..voice.actions import EndTurn, MoveOn, OfferRest, Praise, SafetyStop, Stop
 from ..voice.merge import merge
 from ..voice.session import SessionEngine
 from ..llm import templates
@@ -94,6 +94,7 @@ class AppSession:
         self._loud = 0
         self._ticker: Optional[asyncio.Task] = None
         self._advance: Optional[asyncio.Task] = None
+        self._engine_lock = asyncio.Lock()
 
     # --- clock & context ------------------------------------------------------
 
@@ -122,11 +123,27 @@ class AppSession:
 
     async def _feed(self, event: tuple) -> list:
         """Run one engine event off the loop thread (the engine uses asyncio.run internally)."""
-        return await asyncio.to_thread(self.engine.feed, event)
+        async with self._engine_lock:
+            task = asyncio.create_task(asyncio.to_thread(self.engine.feed, event))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Cancelling a timer cannot stop its worker thread. Keep the lock until it
+                # finishes so another event cannot mutate the engine concurrently.
+                await task
+                raise
 
     async def _run_engine(self, event: tuple) -> list:
+        if self.ended:
+            return []
         before = len(self.engine.replies)
         acts = await self._feed(event)
+        if self.ended:
+            return []
+        if any(isinstance(a, SafetyStop) for a in acts):
+            self.ended = True
+            self._cancel_ticker()
+            self._cancel_advance()
         events: list[Optional[dict]] = []
         for a in acts:
             events += bridge.action_to_events(a, self._ctx())
@@ -140,6 +157,8 @@ class AppSession:
     # --- lifecycle ------------------------------------------------------------
 
     async def start(self) -> None:
+        if self.ended:
+            return
         self._t0 = asyncio.get_running_loop().time()
         greeting = templates.greeting(self.first_name)
         await self._emit([{"type": "greeting", "text": greeting, "caption": greeting}])
@@ -153,6 +172,8 @@ class AppSession:
         self.current = self.words[self.idx % len(self.words)] if self.words else None
         payload = presenter.prompt_payload(self.current, self.cfg.feedback, self.profile)
         acts = await self._feed(("prompt", self.current, payload["topic"], self.now()))
+        if self.ended or self.engine.controller.state == State.SAFETY_STOP:
+            return
         if any(isinstance(a, Stop) for a in acts):
             self.ended = True
             await self._emit([{"type": "ended", "reason": "done", "found": sorted(self.engine.found)}])
@@ -232,7 +253,7 @@ class AppSession:
         if self.feedback == Feedback.LOUDNESS.value:
             sig = safetymod.check(text)
             if sig is not None:
-                await self._emit([{"type": "safety", **presenter.safety_card(sig.card, self.region)}])
+                await self._run_engine((kind, text, self.now()))
                 return
             self._loud += 1
             strong = self._loud % 2 == 0
@@ -265,11 +286,13 @@ class AppSession:
     async def _silence_step(self) -> bool:
         """Feed one ``silence`` tick; return True when the turn has ended (stop ticking)."""
         acts = await self._run_engine(("silence", self.now()))
-        return any(isinstance(a, (MoveOn, EndTurn, Stop)) for a in acts)
+        return self.ended or any(isinstance(a, (MoveOn, EndTurn, Stop)) for a in acts)
 
     # --- turn advancement -----------------------------------------------------
 
     def _maybe_advance(self, acts: list) -> None:
+        if self.ended:
+            return
         if any(isinstance(a, Stop) for a in acts):
             self.ended = True
             return
@@ -279,24 +302,28 @@ class AppSession:
             self._schedule_advance(0.9)
 
     def _schedule_advance(self, delay: float) -> None:
+        if self.ended:
+            return
         self._cancel_advance()
         self._advance = asyncio.create_task(self._do_advance(delay))
 
     async def _do_advance(self, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
+            if self.ended:
+                return
             self.idx += 1
             await self.next_prompt()
         except asyncio.CancelledError:  # pragma: no cover
             pass
 
     def _cancel_ticker(self) -> None:
-        if self._ticker and not self._ticker.done():
+        if self._ticker and not self._ticker.done() and self._ticker is not asyncio.current_task():
             self._ticker.cancel()
         self._ticker = None
 
     def _cancel_advance(self) -> None:
-        if self._advance and not self._advance.done():
+        if self._advance and not self._advance.done() and self._advance is not asyncio.current_task():
             self._advance.cancel()
         self._advance = None
 

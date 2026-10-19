@@ -55,19 +55,25 @@ function ratio(a, b) {
 class DemoEngine extends EventTarget {
   constructor() { super(); this.profile = null; this.words = []; this.idx = 0; this.turn = 0; this.level = 0; this.pending = null; this.timers = []; this.found = []; }
 
-  _emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+  _emit(type, detail) {
+    if (this.safetyStopped && type !== 'safety' && type !== 'ended') return;
+    if (type === 'safety') { this.safetyStopped = true; this._clear(); }
+    this.dispatchEvent(new CustomEvent(type, { detail }));
+  }
   _clear() { this.timers.forEach(clearTimeout); this.timers = []; }
-  _after(ms, fn) { const id = setTimeout(fn, ms); this.timers.push(id); return id; }
+  _after(ms, fn) { if (this.safetyStopped) return; const id = setTimeout(() => { if (!this.safetyStopped) fn(); }, ms); this.timers.push(id); return id; }
 
   setProfile(key) { this.profile = PROFILES[key]; this.words = DEMO_WORDS[key] || DEMO_WORDS.finding_words; this.profileKey = key; }
 
   start() {
+    if (this.safetyStopped) return;
     this.idx = 0; this.turn = 0; this.found = [];
     this._emit('greeting', { text: `Hi Margaret. I'm an AI practice partner.`, caption: `I'm an AI practice partner.` });
     this._after(900, () => this._nextPrompt());
   }
 
   _nextPrompt() {
+    if (this.safetyStopped) return;
     this._clear(); this.level = 0; this.pending = null; this.turn += 1;
     if (this.profile.max_turns && this.turn > this.profile.max_turns) { this.stop('done'); return; }
     const w = this.words[this.idx % this.words.length];
@@ -81,6 +87,7 @@ class DemoEngine extends EventTarget {
 
   // The person has gone quiet; start the patience clock (demo of on_silence).
   beginPause() {
+    if (this.safetyStopped) return;
     this._clear();
     this._emit('state', { state: 'silent' });
     const p = this.profile;
@@ -92,9 +99,10 @@ class DemoEngine extends EventTarget {
     });
   }
 
-  speech() { this._clear(); this._emit('state', { state: 'listening' }); } // any sound resets the clock
+  speech() { if (this.safetyStopped) return; this._clear(); this._emit('state', { state: 'listening' }); } // any sound resets the clock
 
   help() {
+    if (this.safetyStopped) return;
     if (!this.profile.hints) return; // never for Getting words out
     this.level = Math.min(this.level + 1, 3);
     const w = this.current;
@@ -116,6 +124,7 @@ class DemoEngine extends EventTarget {
   typed(text) { this._heard(text); }
 
   _heard(text) {
+    if (this.safetyStopped) return;
     this._clear();
     this._emit('caption', { who: 'you', text });
     if (STROKE.test(text)) { this._emit('safety', { card: 'stroke_signs', title: 'Call 999 now', body: 'Sudden changes in speech, face or arm need help now.', number: '999' }); return; }
@@ -136,12 +145,14 @@ class DemoEngine extends EventTarget {
   }
 
   confirmTap(ok) {
+    if (this.safetyStopped) return;
     if (ok) { this._found(); }
     else { this.pending = null; this._emit('state', { state: 'listening' }); }
   }
   answer(yes) { if (this.pending) return this.confirmTap(yes); if (yes) this.help(); else { this._emit('state', { state: 'listening' }); } }
 
   _found() {
+    if (this.safetyStopped) return;
     const w = this.current;
     this.found.push(w.text);
     this._emit('found', { word: w.text, hintLevel: this.level });
@@ -149,9 +160,9 @@ class DemoEngine extends EventTarget {
     this._after(1600, () => { this.idx += 1; this._nextPrompt(); });
   }
 
-  done() { if (this.profile.needs_complete_text) { this._emit('reply', { text: 'Thanks.' }); this._after(600, () => { this.idx += 1; this._nextPrompt(); }); } }
-  rest() { this._emit('state', { state: 'resting' }); }
-  resume() { this.idx += 1; this._nextPrompt(); }
+  done() { if (this.safetyStopped) return; if (this.profile.needs_complete_text) { this._emit('reply', { text: 'Thanks.' }); this._after(600, () => { this.idx += 1; this._nextPrompt(); }); } }
+  rest() { if (this.safetyStopped) return; this._emit('state', { state: 'resting' }); }
+  resume() { if (this.safetyStopped) return; this.idx += 1; this._nextPrompt(); }
   stop(reason) { this._clear(); this._emit('ended', { reason, found: this.found.slice() }); }
 }
 

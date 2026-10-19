@@ -389,8 +389,7 @@ table.pl-grid th { background: var(--pl-caption-bg); }
 <a class="pl-visually-hidden" href="#pl-root">Skip to content</a>
 <main id="pl-root" role="main"></main>
 <script>
-/* Offline demo / replay mode: no microphone, no network. Append ?mode=judge to the URL to see
-   the J1 live trace. */
+/* Offline demo / replay mode: no microphone, no network. */
 /* Patient Listener — client. Two drivers behind one event API:
  *   - DemoEngine: runs entirely in the browser, reproducing the server's observable behaviour
  *     (mm at backchannel_s, offer at offer_hint_s, the hint ladder, the 0.90/0.60 match bands,
@@ -448,19 +447,25 @@ function ratio(a, b) {
 class DemoEngine extends EventTarget {
   constructor() { super(); this.profile = null; this.words = []; this.idx = 0; this.turn = 0; this.level = 0; this.pending = null; this.timers = []; this.found = []; }
 
-  _emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+  _emit(type, detail) {
+    if (this.safetyStopped && type !== 'safety' && type !== 'ended') return;
+    if (type === 'safety') { this.safetyStopped = true; this._clear(); }
+    this.dispatchEvent(new CustomEvent(type, { detail }));
+  }
   _clear() { this.timers.forEach(clearTimeout); this.timers = []; }
-  _after(ms, fn) { const id = setTimeout(fn, ms); this.timers.push(id); return id; }
+  _after(ms, fn) { if (this.safetyStopped) return; const id = setTimeout(() => { if (!this.safetyStopped) fn(); }, ms); this.timers.push(id); return id; }
 
   setProfile(key) { this.profile = PROFILES[key]; this.words = DEMO_WORDS[key] || DEMO_WORDS.finding_words; this.profileKey = key; }
 
   start() {
+    if (this.safetyStopped) return;
     this.idx = 0; this.turn = 0; this.found = [];
     this._emit('greeting', { text: `Hi Margaret. I'm an AI practice partner.`, caption: `I'm an AI practice partner.` });
     this._after(900, () => this._nextPrompt());
   }
 
   _nextPrompt() {
+    if (this.safetyStopped) return;
     this._clear(); this.level = 0; this.pending = null; this.turn += 1;
     if (this.profile.max_turns && this.turn > this.profile.max_turns) { this.stop('done'); return; }
     const w = this.words[this.idx % this.words.length];
@@ -474,6 +479,7 @@ class DemoEngine extends EventTarget {
 
   // The person has gone quiet; start the patience clock (demo of on_silence).
   beginPause() {
+    if (this.safetyStopped) return;
     this._clear();
     this._emit('state', { state: 'silent' });
     const p = this.profile;
@@ -485,9 +491,10 @@ class DemoEngine extends EventTarget {
     });
   }
 
-  speech() { this._clear(); this._emit('state', { state: 'listening' }); } // any sound resets the clock
+  speech() { if (this.safetyStopped) return; this._clear(); this._emit('state', { state: 'listening' }); } // any sound resets the clock
 
   help() {
+    if (this.safetyStopped) return;
     if (!this.profile.hints) return; // never for Getting words out
     this.level = Math.min(this.level + 1, 3);
     const w = this.current;
@@ -509,6 +516,7 @@ class DemoEngine extends EventTarget {
   typed(text) { this._heard(text); }
 
   _heard(text) {
+    if (this.safetyStopped) return;
     this._clear();
     this._emit('caption', { who: 'you', text });
     if (STROKE.test(text)) { this._emit('safety', { card: 'stroke_signs', title: 'Call 999 now', body: 'Sudden changes in speech, face or arm need help now.', number: '999' }); return; }
@@ -529,12 +537,14 @@ class DemoEngine extends EventTarget {
   }
 
   confirmTap(ok) {
+    if (this.safetyStopped) return;
     if (ok) { this._found(); }
     else { this.pending = null; this._emit('state', { state: 'listening' }); }
   }
   answer(yes) { if (this.pending) return this.confirmTap(yes); if (yes) this.help(); else { this._emit('state', { state: 'listening' }); } }
 
   _found() {
+    if (this.safetyStopped) return;
     const w = this.current;
     this.found.push(w.text);
     this._emit('found', { word: w.text, hintLevel: this.level });
@@ -542,9 +552,9 @@ class DemoEngine extends EventTarget {
     this._after(1600, () => { this.idx += 1; this._nextPrompt(); });
   }
 
-  done() { if (this.profile.needs_complete_text) { this._emit('reply', { text: 'Thanks.' }); this._after(600, () => { this.idx += 1; this._nextPrompt(); }); } }
-  rest() { this._emit('state', { state: 'resting' }); }
-  resume() { this.idx += 1; this._nextPrompt(); }
+  done() { if (this.safetyStopped) return; if (this.profile.needs_complete_text) { this._emit('reply', { text: 'Thanks.' }); this._after(600, () => { this.idx += 1; this._nextPrompt(); }); } }
+  rest() { if (this.safetyStopped) return; this._emit('state', { state: 'resting' }); }
+  resume() { if (this.safetyStopped) return; this.idx += 1; this._nextPrompt(); }
   stop(reason) { this._clear(); this._emit('ended', { reason, found: this.found.slice() }); }
 }
 
@@ -579,7 +589,69 @@ class LiveDriver extends EventTarget {
   setProfile() {} beginPause() {} speech() {} sayWord() {} saySoundAlike() {} saySomethingElse() {} strokePhrase() {}
 }
 
-window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_WS_URL };
+/* Server driver: the text/logic transport. Connects to the app server's WebSocket and drives
+ * the REAL Python controller (safety, matching, hints, patience timing, logging) with control +
+ * text messages instead of mic audio. Works offline against `patient-listener-server`, no GPU.
+ * The on-screen demo controls stay visible and map to messages the server resolves against the
+ * current target, so the backend decides everything. Enabled when window.PL_API is set (the
+ * patient app sets it to same-origin when served over http). */
+const NEED_TO_PERSON = { finding_words: 'margaret', words_out: 'daniyal', being_heard: 'joseph' };
+
+class ServerDriver extends EventTarget {
+  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; }
+
+  setProfile(needKey) { this.person = NEED_TO_PERSON[needKey] || 'margaret'; }
+
+  async start() {
+    const r = await fetch(`${this.apiBase}/api/session?person=${encodeURIComponent(this.person)}`);
+    if (!r.ok) throw new Error(`session request failed: ${r.status}`);
+    const { ws_url, token } = await r.json();
+    await new Promise((resolve, reject) => {
+      this.ws = new WebSocket(`${ws_url}?token=${encodeURIComponent(token)}`);
+      this.ws.onopen = () => { this.ws.send(JSON.stringify({ type: 'start' })); resolve(); };
+      this.ws.onerror = (e) => reject(e);
+      this.ws.onmessage = (e) => { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); };
+      this.ws.onclose = () => this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+    });
+  }
+
+  _send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }
+
+  // Demo controls -> messages the server resolves against the real current target.
+  beginPause() { this._send({ type: 'pause' }); }
+  speech() { this._send({ type: 'speech' }); }
+  sayWord() { this._send({ type: 'demo_say', variant: 'exact' }); }
+  saySoundAlike() { this._send({ type: 'demo_say', variant: 'close' }); }
+  saySomethingElse() { this._send({ type: 'demo_say', variant: 'other' }); }
+  strokePhrase() { this._send({ type: 'demo_say', variant: 'stroke' }); }
+  typed(text) { this._send({ type: 'typed', text }); }
+  help() { this._send({ type: 'help' }); }
+  answer(yes) { this._send({ type: yes ? 'yes' : 'no' }); }
+  confirmTap(ok) { this._send({ type: 'confirm_tap', ok }); }
+  done() { this._send({ type: 'done' }); }
+  rest() { this._send({ type: 'rest' }); }
+  resume() { this._send({ type: 'resume' }); }
+  stop() { this._send({ type: 'stop' }); if (this.ws) this.ws.close(); }
+}
+
+/* Driver selection:
+ *   'audio'  - window.PL_WS_URL set: mic + binary audio (the GPU deploy box, LiveDriver).
+ *   'server' - window.PL_API set: text/logic transport against the app server (ServerDriver).
+ *   'demo'   - neither: fully in-browser replay (DemoEngine).
+ * ?demo=1 forces demo; ?server=1 forces server. */
+function plMode() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('demo') === '1') return 'demo';
+  if (window.PL_WS_URL) return 'audio';
+  if (q.get('server') === '1' || window.PL_API != null) return 'server';
+  return 'demo';
+}
+
+window.PLClient = {
+  DemoEngine, LiveDriver, ServerDriver, PROFILES,
+  mode: plMode,
+  isLive: () => plMode() === 'audio',
+};
 
 </script>
 <script>
@@ -590,7 +662,9 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
 
 (function () {
   const root = document.getElementById('pl-root');
-  const live = window.PLClient.isLive();
+  const mode = window.PLClient.mode();   // 'demo' | 'server' | 'audio'
+  const live = mode === 'audio';         // mic + audio path; hides the demo controls
+  const remote = mode !== 'demo';        // uses a network driver; start() is async
   const judge = new URLSearchParams(location.search).get('mode') === 'judge';
 
   const state = {
@@ -633,10 +707,15 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
 
   // ---- client wiring ----
   function makeClient() {
-    const c = live ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
-                   : new window.PLClient.DemoEngine();
-    if (!live) c.setProfile([...state.needs][0] || 'finding_words');
-    const on = (type, fn) => c.addEventListener(type, (e) => { trace(type, e.detail); fn(e.detail); });
+    const c = mode === 'audio' ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
+            : mode === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
+            : new window.PLClient.DemoEngine();
+    if (mode !== 'audio') c.setProfile([...state.needs][0] || 'finding_words');
+    const on = (type, fn) => c.addEventListener(type, (e) => {
+      if (c !== client) return;
+      if (state.ended && state.ended.reason === 'safety' && type !== 'ended') return;
+      trace(type, e.detail); fn(e.detail);
+    });
 
     on('greeting', (d) => { pushCaption('listener', d.caption); });
     on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
@@ -652,8 +731,17 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
     on('moveOn', () => { pushCaption('listener', "Let's try another."); });
     on('restOffer', () => { show('REST'); });
     on('checkComplete', () => { /* keep waiting quietly (Getting words out) */ });
-    on('safety', (d) => { state.safety = d; show('P8'); });
-    on('ended', (d) => { state.ended = d; show('END'); });
+    on('safety', (d) => {
+      state.safety = d;
+      state.ended = { reason: 'safety', found: state.today.slice() };
+      // Stop timers, close the transport and release the microphone before showing the card.
+      c.stop('safety');
+      show('P8');
+    });
+    on('ended', (d) => {
+      if (state.ended && state.ended.reason === 'safety') return;
+      state.ended = d; show('END');
+    });
     on('attempt', () => {});
     return c;
   }
@@ -681,13 +769,13 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
   }
 
   // ---- routing ----
-  function show(route) { state.route = route; render(); }
+  function show(route) { if (state.safety && route !== 'P8') return; state.route = route; render(); }
 
   function render() {
     root.innerHTML = '';
     const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
     app.append(themeToggle());
-    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, REST: screenRest, END: screenEnd, P9: screenP9 };
+    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9 };
     (screens[state.route] || screenP0)(app);
     root.append(app);
     if (state.route === 'P8' && state.safety) overlaySafety();
@@ -764,7 +852,7 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
         h('h1', { class: 'pl-prompt' }, 'Can you hear me?'),
-        h('p', { class: 'pl-muted' }, live ? 'Tap to allow the microphone, then say hello.' : 'Demo mode: no microphone needed.'),
+        h('p', { class: 'pl-muted' }, live ? 'Tap to allow the microphone, then say hello.' : 'No microphone needed — use the on-screen controls.'),
         h('div', { class: 'pl-ring', 'aria-hidden': 'true' }, '🔊'),
         h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, 'Yes, start'),
       ));
@@ -772,9 +860,16 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
 
   async function beginSession() {
     if (!client) client = makeClient();
+    state.ended = null;
     state.captions = []; state.today = [];
-    if (live) { try { await client.start(); } catch (e) { state.safety = null; show('P9'); return; } }
-    else { client.start(); }
+    if (remote) {
+      try { await client.start(); }
+      catch (e) {
+        if (live) { state.safety = null; show('P9'); return; }  // mic blocked
+        pushCaption('listener', 'Could not reach the server. Is patient-listener-server running?');
+        return;
+      }
+    } else { client.start(); }
   }
 
   // ---- P3 / P3b: talk ----
@@ -941,7 +1036,7 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
       h('h2', { id: 'pl-safety-title', class: 'pl-safety__title' }, s.title),
       h('p', { id: 'pl-safety-body', class: 'pl-safety__body' }, s.body),
       s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, `📞 Call ${s.number}`) : null,
-      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: () => { state.safety = null; render(); } }, "I'm OK, close"),
+      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: dismissSafety }, 'Close card'),
     );
     backdrop.append(dlg);
     root.append(backdrop);
@@ -949,7 +1044,13 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
     // Speak the safety line once (assistive).
     try { if (window.speechSynthesis && s.card === 'stroke_signs') { const u = new SpeechSynthesisUtterance(`${s.title}. ${s.body}`); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } } catch (e) {}
     // Minimal focus trap.
-    backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { state.safety = null; render(); } });
+    backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') dismissSafety(); });
+  }
+
+  function dismissSafety() {
+    state.safety = null;
+    client = null; // Further practice must create a fresh session explicitly.
+    show('END');
   }
 
   // ---- P9: states ----
@@ -972,7 +1073,7 @@ window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_
   function judgePanel() {
     const box = h('div', { class: 'pl-app', style: 'margin-top:8px' },
       h('h2', { class: 'pl-topbar__title' }, 'J1 — live trace (judge mode)'),
-      h('p', { class: 'pl-muted' }, live ? `Live: ${window.PL_WS_URL}` : 'Demo / replay mode — no model is called.'),
+      h('p', { class: 'pl-muted' }, live ? `Live: ${window.PL_WS_URL}` : mode === 'server' ? 'Live server — the real controller decides over a WebSocket.' : 'Demo / replay mode — no model is called.'),
       h('div', { id: 'pl-trace', class: 'pl-trace' }));
     setTimeout(() => { const t = document.getElementById('pl-trace'); if (t) renderTrace(t); }, 0);
     return box;
