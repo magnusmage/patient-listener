@@ -13,6 +13,7 @@ from ..config import Settings, settings as default_settings
 from ..store.sqlite_store import SqliteStore
 from ..tools.seed import seed_all
 from .tokens import TokenSigner
+from .session_registry import SessionRegistry
 
 __all__ = ["AppState", "build_state"]
 
@@ -24,6 +25,7 @@ class AppState:
     settings: Settings = field(default_factory=lambda: default_settings)
     people: dict[str, str] = field(default_factory=dict)  # persona key -> person_id
     console_demo_store: SqliteStore | None = None
+    sessions: SessionRegistry = field(default_factory=SessionRegistry)
 
 
 def build_state(db_path: str = ":memory:", settings: Settings | None = None) -> AppState:

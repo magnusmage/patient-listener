@@ -168,9 +168,9 @@ class DemoEngine extends EventTarget {
 
 /* Live driver: WebSocket + mic + AudioWorklet. Used when window.PL_WS_URL is set. */
 class LiveDriver extends EventTarget {
-  constructor(url, token) { super(); this.url = url; this.token = token; this.ws = null; this.ctx = null; this.node = null; this.stream = null; }
+  constructor(url, token) { super(); this.url = url; this.token = token; this.device = patientDeviceId(); this.ws = null; this.ctx = null; this.node = null; this.stream = null; }
   async start() {
-    this.ws = new WebSocket(`${this.url}?token=${encodeURIComponent(this.token || '')}`);
+    this.ws = new WebSocket(`${this.url}?token=${encodeURIComponent(this.token || '')}&device=${encodeURIComponent(this.device)}`);
     this.ws.binaryType = 'arraybuffer';
     this.ws.onopen = () => this.ws.send(JSON.stringify({ type: 'start' }));
     this.ws.onmessage = (e) => { if (typeof e.data === 'string') { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); } };
@@ -205,17 +205,39 @@ class LiveDriver extends EventTarget {
  * patient app sets it to same-origin when served over http). */
 const NEED_TO_PERSON = { finding_words: 'margaret', words_out: 'daniyal', being_heard: 'joseph' };
 
+function patientDeviceId() {
+  const key = 'patient-listener-device-id';
+  const configured = window.PL_DEVICE_ID;
+  if (typeof configured === 'string' && /^[A-Za-z0-9_.-]{32,128}$/.test(configured)) return configured;
+  try {
+    let id = window.localStorage.getItem(key);
+    if (!id) {
+      const values = new Uint8Array(24);
+      crypto.getRandomValues(values);
+      id = Array.from(values, n => n.toString(16).padStart(2, '0')).join('');
+      window.localStorage.setItem(key, id);
+    }
+    return id;
+  } catch (e) {
+    const values = new Uint8Array(24);
+    crypto.getRandomValues(values);
+    return Array.from(values, n => n.toString(16).padStart(2, '0')).join('');
+  }
+}
+
 class ServerDriver extends EventTarget {
-  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; }
+  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; this.device = patientDeviceId(); }
 
   setProfile(needKey) { this.person = NEED_TO_PERSON[needKey] || 'margaret'; }
 
   async start() {
-    const r = await fetch(`${this.apiBase}/api/session?person=${encodeURIComponent(this.person)}`);
+    const r = await fetch(`${this.apiBase}/api/session?person=${encodeURIComponent(this.person)}`, {
+      headers: { 'X-PL-Device': this.device }, cache: 'no-store'
+    });
     if (!r.ok) throw new Error(`session request failed: ${r.status}`);
     const { ws_url, token } = await r.json();
     await new Promise((resolve, reject) => {
-      this.ws = new WebSocket(`${ws_url}?token=${encodeURIComponent(token)}`);
+      this.ws = new WebSocket(`${ws_url}?token=${encodeURIComponent(token)}&device=${encodeURIComponent(this.device)}`);
       this.ws.onopen = () => { this.ws.send(JSON.stringify({ type: 'start' })); resolve(); };
       this.ws.onerror = (e) => reject(e);
       this.ws.onmessage = (e) => { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); };
@@ -258,5 +280,6 @@ function plMode() {
 window.PLClient = {
   DemoEngine, LiveDriver, ServerDriver, PROFILES,
   mode: plMode,
+  patientDeviceId,
   isLive: () => plMode() === 'audio',
 };

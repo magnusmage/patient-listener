@@ -32,6 +32,8 @@ def _drain_until(ws, want_type, limit=12):
 
 @unittest.skipUnless(HAVE_API, "needs the 'api' extra (fastapi)")
 class HttpTests(unittest.TestCase):
+    DEVICE = "a" * 48
+
     def setUp(self):
         self.client = TestClient(create_app())
         self.client.__enter__()  # trigger lifespan (seed the store)
@@ -45,12 +47,19 @@ class HttpTests(unittest.TestCase):
         self.assertIn("text/html", r.headers["content-type"])
 
     def test_session_token_issued(self):
-        r = self.client.get("/api/session", params={"person": "margaret"})
+        r = self.client.get(
+            "/api/session", params={"person": "margaret"}, headers={"X-PL-Device": self.DEVICE}
+        )
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertIn("token", body)
         self.assertTrue(body["ws_url"].endswith("/ws"))
         self.assertEqual(body["needs"], ["finding_words"])
+        self.assertEqual(r.headers["cache-control"], "no-store")
+
+    def test_session_token_requires_a_device_identifier(self):
+        r = self.client.get("/api/session", params={"person": "margaret"})
+        self.assertEqual(r.status_code, 400)
 
     def test_unknown_person_404(self):
         self.assertEqual(self.client.get("/api/session", params={"person": "nobody"}).status_code, 404)
@@ -63,11 +72,15 @@ class HttpTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_API, "needs the 'api' extra (fastapi)")
 class SessionFlowTests(unittest.TestCase):
+    DEVICE = "a" * 48
+
     def setUp(self):
         self.client = TestClient(create_app())
         self.client.__enter__()
-        token = self.client.get("/api/session", params={"person": "margaret"}).json()["token"]
-        self._ws = self.client.websocket_connect(f"/ws?token={token}")
+        token = self.client.get(
+            "/api/session", params={"person": "margaret"}, headers={"X-PL-Device": self.DEVICE}
+        ).json()["token"]
+        self._ws = self.client.websocket_connect(f"/ws?token={token}&device={self.DEVICE}")
         self.ws = self._ws.__enter__()
 
     def tearDown(self):
@@ -123,6 +136,44 @@ class SessionFlowTests(unittest.TestCase):
         self.ws.send_json({"type": "help"})
         hint = _drain_until(self.ws, "hint")[-1]
         self.assertEqual(hint["level"], 1)  # meaning first
+
+
+@unittest.skipUnless(HAVE_API, "needs the 'api' extra (fastapi)")
+class SessionAccessTests(unittest.TestCase):
+    DEVICE_A = "a" * 48
+    DEVICE_B = "b" * 48
+
+    def setUp(self):
+        self.client = TestClient(create_app())
+        self.client.__enter__()
+
+    def tearDown(self):
+        self.client.__exit__(None, None, None)
+
+    def _token(self, device):
+        return self.client.get(
+            "/api/session", params={"person": "margaret"}, headers={"X-PL-Device": device}
+        ).json()["token"]
+
+    def test_token_cannot_be_reused_from_a_different_device(self):
+        token = self._token(self.DEVICE_A)
+        with self.assertRaises(Exception):
+            with self.client.websocket_connect(f"/ws?token={token}&device={self.DEVICE_B}"):
+                pass
+
+    def test_second_active_session_is_rejected_and_disconnect_releases_lock(self):
+        first_token = self._token(self.DEVICE_A)
+        with self.client.websocket_connect(f"/ws?token={first_token}&device={self.DEVICE_A}"):
+            second_token = self._token(self.DEVICE_B)
+            with self.assertRaises(Exception):
+                with self.client.websocket_connect(f"/ws?token={second_token}&device={self.DEVICE_B}"):
+                    pass
+
+        reconnect_token = self._token(self.DEVICE_B)
+        with self.client.websocket_connect(f"/ws?token={reconnect_token}&device={self.DEVICE_B}") as ws:
+            ws.send_json({"type": "start"})
+            events = _drain_until(ws, "prompt")
+            self.assertIn("greeting", [event["type"] for event in events])
 
 
 if __name__ == "__main__":

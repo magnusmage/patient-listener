@@ -56,19 +56,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def private_api_no_cache(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith("/api/console/"):
+        if request.url.path.startswith("/api/console/") or request.url.path == "/api/session":
             response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.get("/api/session")
     async def session_token(
-        request: Request, person: str = Query("margaret")
+        request: Request, person: str = Query("margaret"), device: str = Query("")
     ) -> JSONResponse:
         state = request.app.state.pl
         pid = state.people.get(person, person)
         if pid not in state.people.values():
             return JSONResponse({"error": f"unknown person: {person}"}, status_code=404)
-        token = state.signer.issue(pid)
+        # Header is preferred for the HTTP request; query support keeps a plain browser client
+        # usable when it cannot attach a custom header. Neither value is logged or persisted.
+        device = request.headers.get("x-pl-device", device)
+        try:
+            token = state.signer.issue(pid, device)
         except ValueError:
             return JSONResponse({"error": "A valid device identifier is required"}, status_code=400)
         scheme = "wss" if request.url.scheme == "https" else "ws"
@@ -84,12 +88,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.websocket("/ws")
-    async def ws(websocket: WebSocket, token: str = Query("")) -> None:
+    async def ws(websocket: WebSocket, token: str = Query(""), device: str = Query("")) -> None:
         state = websocket.app.state.pl
         try:
-            claims = state.signer.verify(token)
+            claims = state.signer.verify(token, device)
         except ValueError:
             await websocket.close(code=1008)  # policy violation: bad / expired token
+            return
+        if not await state.sessions.claim(claims.person_id):
+            await websocket.close(code=1013, reason="Practice is already active on another device")
             return
         await websocket.accept()
 
@@ -109,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         finally:
             app_session.close()
+            await state.sessions.release(claims.person_id)
 
     # Static frontend last, so /api/* and /ws win. html=True serves index.html at "/".
     web = _web_dir()

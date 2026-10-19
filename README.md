@@ -160,7 +160,12 @@ node --test tests/console_auth_web.test.cjs
 ```
 
 The patient app auto-selects **server mode** when served over http (it fetches
-`GET /api/session`, opens the WebSocket, and keeps the on-screen controls as mic stand-ins). The app falls back to offline **demo mode** when opened from `file://`.
+`GET /api/session`, opens the WebSocket, and keeps the on-screen controls as mic stand-ins). It
+creates one opaque, persistent browser device ID, and every issued token is usable only from that
+device. The server permits one active practice connection per patient; another device is rejected
+with “Practice is already active on another device” until the current connection closes. This
+in-process lock covers one server process; a multi-worker deployment needs a shared session
+registry such as Redis. The app falls back to offline **demo mode** when opened from `file://`.
 The console reads
 `GET /api/console/*` and falls back to its mock data offline (`?mock=1` forces the mock).
 The three demo personas (Margaret · finding words, Daniyal · getting words started, Joseph ·
@@ -176,6 +181,7 @@ pipeline (NeMo ASR / Magpie TTS behind the `Asr`/`Tts` ports) is scaffolded in
 <script>
   window.PL_WS_URL = "wss://<voice-endpoint>/ws";  // the deployed Serverless voice endpoint
   window.PL_TOKEN  = "<15-minute session token>";   // issued by the app API
+  window.PL_DEVICE_ID = "<persistent opaque browser-device-id>"; // bound when that token was issued
 </script>
 ```
 

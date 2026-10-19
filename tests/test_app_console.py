@@ -95,7 +95,9 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertEqual(response.headers["cache-control"], "no-store")
 
     def test_invalid_and_patient_session_tokens_are_rejected(self):
-        patient_token = self.client.get("/api/session").json()["token"]
+        patient_token = self.client.get(
+            "/api/session", headers={"X-PL-Device": "a" * 48}
+        ).json()["token"]
         for token in ("made-up", patient_token):
             self.assertEqual(self.client.get("/api/console/caseload", headers={
                 "Authorization": "Bearer " + token

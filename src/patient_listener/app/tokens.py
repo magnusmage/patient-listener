@@ -1,9 +1,10 @@
-"""Short-lived session tokens (the "15-minute session token issued by the app API").
+"""Short-lived, device-bound patient session tokens.
 
-A session token authorises one WebSocket connection for one person for a bounded window. It is
-an HMAC-signed, URL-safe ``person_id.expiry.signature`` triple - no server-side session store,
-no PII in the token beyond the opaque person id. The browser never sees the signing secret; it
-only ever receives a token minted by :func:`issue`.
+A session token authorises one WebSocket connection for one person and one browser device for a
+bounded window. It is an HMAC-signed, URL-safe
+``person_id.expiry.device_hash.signature`` token. The raw device identifier never appears in the
+token: only its SHA-256 digest does. One live connection per person is enforced separately by
+``SessionRegistry`` because signing alone cannot track a socket's lifecycle.
 
 The secret comes from ``SESSION_TOKEN_SECRET``; in dev a stable per-process random secret is
 used so tokens are valid for the lifetime of the server but never across restarts.
@@ -18,7 +19,7 @@ import secrets
 import time
 from dataclasses import dataclass
 
-__all__ = ["TokenSigner", "SessionToken", "DEFAULT_TTL_S"]
+__all__ = ["TokenSigner", "SessionToken", "DEFAULT_TTL_S", "validate_device_id"]
 
 DEFAULT_TTL_S = 15 * 60  # 15 minutes (README)
 
@@ -27,6 +28,20 @@ DEFAULT_TTL_S = 15 * 60  # 15 minutes (README)
 class SessionToken:
     person_id: str
     expires_at: float
+    device_hash: str
+
+
+def validate_device_id(device_id: str) -> str:
+    """Validate the opaque browser device nonce before signing or checking it."""
+    if not 32 <= len(device_id) <= 128:
+        raise ValueError("invalid device")
+    if not all(c.isascii() and (c.isalnum() or c in "_-.") for c in device_id):
+        raise ValueError("invalid device")
+    return device_id
+
+
+def _device_hash(device_id: str) -> str:
+    return _b64(hashlib.sha256(validate_device_id(device_id).encode("ascii")).digest())
 
 
 def _b64(raw: bytes) -> str:
@@ -51,27 +66,32 @@ class TokenSigner:
         mac = hmac.new(self._secret, payload.encode("utf-8"), hashlib.sha256).digest()
         return _b64(mac)
 
-    def issue(self, person_id: str, now: float | None = None) -> str:
+    def issue(self, person_id: str, device_id: str, now: float | None = None) -> str:
         """Mint a token for ``person_id`` valid for ``ttl_s`` seconds."""
         now = time.time() if now is None else now
         expiry = int(now + self.ttl_s)
-        payload = f"{_b64(person_id.encode('utf-8'))}.{expiry}"
+        payload = f"{_b64(person_id.encode('utf-8'))}.{expiry}.{_device_hash(device_id)}"
         return f"{payload}.{self._sign(payload)}"
 
-    def verify(self, token: str, now: float | None = None) -> SessionToken:
+    def verify(self, token: str, device_id: str, now: float | None = None) -> SessionToken:
         """Return the :class:`SessionToken` or raise ``ValueError`` if invalid or expired."""
         now = time.time() if now is None else now
         try:
-            pid_b64, expiry_s, sig = token.split(".")
+            pid_b64, expiry_s, token_device_hash, sig = token.split(".")
         except ValueError as exc:  # wrong shape
             raise ValueError("malformed token") from exc
-        payload = f"{pid_b64}.{expiry_s}"
+        payload = f"{pid_b64}.{expiry_s}.{token_device_hash}"
         if not hmac.compare_digest(sig, self._sign(payload)):
             raise ValueError("bad signature")
+        if not hmac.compare_digest(token_device_hash, _device_hash(device_id)):
+            raise ValueError("wrong device")
         try:
             expiry = int(expiry_s)
         except ValueError as exc:
             raise ValueError("bad expiry") from exc
         if now >= expiry:
             raise ValueError("expired")
-        return SessionToken(person_id=_unb64(pid_b64).decode("utf-8"), expires_at=float(expiry))
+        return SessionToken(
+            person_id=_unb64(pid_b64).decode("utf-8"), expires_at=float(expiry),
+            device_hash=token_device_hash,
+        )

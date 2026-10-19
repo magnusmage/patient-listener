@@ -33,28 +33,43 @@ def _word(text="kettle", kind="object", first="K", cue="you boil water in it"):
 
 
 class TokenTests(unittest.TestCase):
+    DEVICE_A = "a" * 48
+    DEVICE_B = "b" * 48
+
     def test_roundtrip(self):
         s = TokenSigner(secret="unit-secret")
-        tok = s.issue("demo-margaret")
-        claims = s.verify(tok)
+        tok = s.issue("demo-margaret", self.DEVICE_A)
+        claims = s.verify(tok, self.DEVICE_A)
         self.assertEqual(claims.person_id, "demo-margaret")
+        self.assertNotIn(self.DEVICE_A, tok)
 
     def test_rejects_tampered(self):
         s = TokenSigner(secret="unit-secret")
-        tok = s.issue("demo-margaret")
+        tok = s.issue("demo-margaret", self.DEVICE_A)
         with self.assertRaises(ValueError):
-            s.verify(tok + "x")
+            s.verify(tok + "x", self.DEVICE_A)
 
     def test_rejects_wrong_secret(self):
-        tok = TokenSigner(secret="a").issue("p")
+        tok = TokenSigner(secret="a").issue("p", self.DEVICE_A)
         with self.assertRaises(ValueError):
-            TokenSigner(secret="b").verify(tok)
+            TokenSigner(secret="b").verify(tok, self.DEVICE_A)
 
     def test_rejects_expired(self):
         s = TokenSigner(secret="a", ttl_s=1)
-        tok = s.issue("p", now=1000.0)
+        tok = s.issue("p", self.DEVICE_A, now=1000.0)
         with self.assertRaises(ValueError):
-            s.verify(tok, now=1002.0)
+            s.verify(tok, self.DEVICE_A, now=1002.0)
+
+    def test_rejects_a_token_presented_by_another_device(self):
+        s = TokenSigner(secret="unit-secret")
+        tok = s.issue("demo-margaret", self.DEVICE_A)
+        with self.assertRaises(ValueError):
+            s.verify(tok, self.DEVICE_B)
+
+    def test_rejects_invalid_device_identifier(self):
+        s = TokenSigner(secret="unit-secret")
+        with self.assertRaises(ValueError):
+            s.issue("demo-margaret", "too-short")
 
 
 class PresenterTests(unittest.TestCase):
