@@ -1,0 +1,101 @@
+"""FastAPI application: serves the frontend, issues session tokens, and runs the real decision
+core over a WebSocket. The pure core is untouched; this is the adapter that wires it to ``web/``.
+
+Run it::
+
+    pip install -e '.[api]'
+    patient-listener-server            # or: uvicorn 'patient_listener.app.server:create_app' --factory
+
+Then open http://localhost:8000/ (patient app, server mode) and /console.html (therapist console).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from .console_api import router as console_router
+from .deps import build_state
+from .session import AppSession
+
+__all__ = ["create_app"]
+
+
+def _web_dir() -> Path:
+    override = os.environ.get("PL_WEB_DIR")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parents[3] / "web"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    app.state.pl = build_state(db_path=os.environ.get("PL_DB_PATH", ":memory:"))
+    try:
+        yield
+    finally:
+        app.state.pl.store.close()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="Patient Listener", lifespan=_lifespan)
+    app.include_router(console_router)
+
+    @app.get("/api/session")
+    async def session_token(request: Request, person: str = Query("margaret")) -> JSONResponse:
+        state = request.app.state.pl
+        pid = state.people.get(person, person)
+        if pid not in state.people.values():
+            return JSONResponse({"error": f"unknown person: {person}"}, status_code=404)
+        token = state.signer.issue(pid)
+        scheme = "wss" if request.url.scheme == "https" else "ws"
+        host = request.headers.get("host", "localhost:8000")
+        needs = sorted(n.value for n in state.store.person_needs(pid))
+        return JSONResponse(
+            {
+                "ws_url": f"{scheme}://{host}/ws",
+                "token": token,
+                "person": person,
+                "needs": needs,
+            }
+        )
+
+    @app.websocket("/ws")
+    async def ws(websocket: WebSocket, token: str = Query("")) -> None:
+        state = websocket.app.state.pl
+        try:
+            claims = state.signer.verify(token)
+        except ValueError:
+            await websocket.close(code=1008)  # policy violation: bad / expired token
+            return
+        await websocket.accept()
+
+        async def send(event: dict) -> None:
+            await websocket.send_json(event)
+
+        app_session = AppSession(store=state.store, person_id=claims.person_id, send=send)
+        try:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                if (text := message.get("text")) is not None:
+                    await app_session.handle(json.loads(text))
+                # Binary frames are audio (deploy box only); ignored in the offline transport.
+        except WebSocketDisconnect:
+            pass
+        finally:
+            app_session.close()
+
+    # Static frontend last, so /api/* and /ws win. html=True serves index.html at "/".
+    web = _web_dir()
+    if web.is_dir():
+        app.mount("/", StaticFiles(directory=str(web), html=True), name="web")
+
+    return app

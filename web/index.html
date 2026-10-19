@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Patient Listener — a voice practice partner that waits." />
+  <title>Patient Listener</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <a class="pl-visually-hidden" href="#pl-root">Skip to content</a>
+  <main id="pl-root" role="main"></main>
+
+  <script>
+    // Three ways to run:
+    //  1. Served by the app server (patient-listener-server): auto-detected below — the app
+    //     opens a WebSocket to the REAL Python controller (no mic needed). Add ?demo=1 to force
+    //     the in-browser replay instead.
+    //  2. Live voice endpoint (GPU deploy box): set these before app.js loads to stream the mic:
+    //       window.PL_WS_URL = "wss://<voice-endpoint>/ws";
+    //       window.PL_TOKEN  = "<15-min session token>";
+    //  3. Opened straight from disk (file://): offline demo / replay mode, no server needed.
+    if (location.protocol.startsWith('http') && typeof window.PL_API === 'undefined' && !window.PL_WS_URL) {
+      window.PL_API = '';  // same-origin app server -> server (logic) mode
+    }
+  </script>
+  <script src="client.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

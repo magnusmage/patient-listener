@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="description" content="Patient Listener — a voice practice partner that waits (offline demo)." />
+<title>Patient Listener — demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Patient Listener — design tokens (workbook: Design system -> Tokens).
+   The ONLY place raw colour values appear. Every text pair is >= 7:1 (AAA), edges >= 3:1.
+   Colour never carries meaning alone (DS-A05). Profiles change behaviour, never colours. */
+
+@font-face {
+  /* Self-hosted Atkinson Hyperlegible Next (OFL). Drop the files in web/fonts/ on deploy;
+     the fallback stack keeps the app legible and correctly sized until then. */
+  font-family: "Atkinson Hyperlegible Next";
+  src: local("Atkinson Hyperlegible Next"), local("Atkinson Hyperlegible");
+  font-display: swap;
+}
+
+:root {
+  /* --- Colour: light (default) --- */
+  --pl-page: #F4F7F6;
+  --pl-surface: #FFFFFF;
+  --pl-text: #11201E;
+  --pl-muted: #3F524E;          /* secondary labels only, never a prompt */
+  --pl-primary: #0B5F58;
+  --pl-on-primary: #FFFFFF;
+  --pl-good: #145A2F;
+  --pl-good-bg: #E3F2E8;
+  --pl-warn: #6A3F00;
+  --pl-warn-bg: #FBEFD9;
+  --pl-danger: #8A1A1F;         /* safety card only, never a wrong word */
+  --pl-danger-bg: #F8E1E1;
+  --pl-line: #6B7F7B;
+  --pl-caption-bg: #E8EFEE;
+
+  /* --- Type: one family (Atkinson Hyperlegible Next, OFL) --- */
+  --pl-font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui,
+             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --pl-text-prompt-size: 36px;  --pl-text-prompt-lh: 1.25;  --pl-text-prompt-wt: 700;
+  --pl-text-hint-size: 40px;    --pl-text-hint-lh: 1.2;     --pl-text-hint-wt: 700;
+  --pl-text-caption-size: 28px; --pl-text-caption-lh: 1.3;  --pl-text-caption-wt: 400;
+  --pl-text-body-size: 24px;    --pl-text-body-lh: 1.4;     --pl-text-body-wt: 400;
+  --pl-text-button-size: 26px;  --pl-text-button-lh: 1.2;   --pl-text-button-wt: 700;
+  --pl-text-console-size: 18px; --pl-text-console-lh: 1.5;  --pl-text-console-wt: 400;
+
+  /* --- Space (8px grid) --- */
+  --pl-space-1: 8px;
+  --pl-space-2: 16px;
+  --pl-space-3: 24px;
+  --pl-space-4: 32px;
+  --pl-space-5: 48px;
+  --pl-space-6: 64px;
+
+  /* --- Shape --- */
+  --pl-target: 64px;            /* patient app min touch target */
+  --pl-target-console: 44px;    /* console min target */
+  --pl-gap-target: 16px;        /* min gap between targets */
+  --pl-radius-card: 16px;
+  --pl-radius-button: 999px;
+  --pl-button-height: 72px;
+  --pl-content-max: 720px;
+
+  /* --- Motion & focus --- */
+  --pl-motion: 0ms;             /* no motion by default (DS-A07) */
+  --pl-focus-width: 4px;
+  --pl-focus-offset: 3px;
+}
+
+/* Motion is opt-in only when the person has not asked to reduce it. */
+@media (prefers-reduced-motion: no-preference) {
+  :root { --pl-motion: 200ms; }
+}
+
+/* --- Colour: dark (system preference), unless the person forced light --- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pl-page: #0F1716;
+    --pl-surface: #16211F;
+    --pl-text: #E6EEEC;
+    --pl-muted: #B3C4C0;
+    --pl-primary: #6FD0C4;
+    --pl-on-primary: #0B1312;
+    --pl-good: #9FE3B5;
+    --pl-good-bg: #123322;
+    --pl-warn: #F2CE8A;
+    --pl-warn-bg: #3A2A05;
+    --pl-danger: #F3B0B2;
+    --pl-danger-bg: #3A1012;
+    --pl-line: #4A5C58;
+    --pl-caption-bg: #12201D;
+  }
+}
+
+/* --- Colour: dark, forced by the theme toggle --- */
+:root[data-theme="dark"] {
+  --pl-page: #0F1716;
+  --pl-surface: #16211F;
+  --pl-text: #E6EEEC;
+  --pl-muted: #B3C4C0;
+  --pl-primary: #6FD0C4;
+  --pl-on-primary: #0B1312;
+  --pl-good: #9FE3B5;
+  --pl-good-bg: #123322;
+  --pl-warn: #F2CE8A;
+  --pl-warn-bg: #3A2A05;
+  --pl-danger: #F3B0B2;
+  --pl-danger-bg: #3A1012;
+  --pl-line: #4A5C58;
+  --pl-caption-bg: #12201D;
+}
+
+/* Patient Listener — components & screens. Uses only tokens.css for colour/type/space.
+   Rules enforced here: 64px targets + 16px gaps (DS-A03), visible focus (DS-A04), colour never
+   alone (DS-A05), no layout shift during speech (DS-T06), no countdown/timer except the
+   time-used bar (DS-T01), content centred <= 720px (DS-A08), 200% zoom & 320px with no sideways
+   scroll (DS-A03). */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--pl-page);
+  color: var(--pl-text);
+  font-family: var(--pl-font);
+  font-size: var(--pl-text-body-size);
+  line-height: var(--pl-text-body-lh);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Everything flows in a single centred column; nothing exceeds the viewport width. */
+.pl-app {
+  max-width: var(--pl-content-max);
+  margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: var(--pl-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+img, svg, canvas { max-width: 100%; height: auto; }
+
+/* --- Focus: always visible (DS-A04) --- */
+:focus-visible {
+  outline: var(--pl-focus-width) solid var(--pl-primary);
+  outline-offset: var(--pl-focus-offset);
+  border-radius: 6px;
+}
+
+.pl-visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+
+/* --- Typography roles --- */
+.pl-prompt {
+  font-size: var(--pl-text-prompt-size);
+  line-height: var(--pl-text-prompt-lh);
+  font-weight: var(--pl-text-prompt-wt);
+  margin: 0;
+}
+.pl-prompt b, .pl-prompt strong { color: var(--pl-primary); }  /* the one key word (DS-C08) */
+.pl-hint-text {
+  font-size: var(--pl-text-hint-size);
+  line-height: var(--pl-text-hint-lh);
+  font-weight: var(--pl-text-hint-wt);
+  margin: 0;
+}
+.pl-muted { color: var(--pl-muted); }
+.pl-disclosure {               /* "I'm an AI practice partner" (DS-C06) */
+  color: var(--pl-muted);
+  font-size: var(--pl-text-body-size);
+  display: flex; align-items: center; gap: var(--pl-space-1);
+}
+
+/* --- Buttons: min 64px, big radius, 72px tall for primary --- */
+.pl-btn {
+  font-family: var(--pl-font);
+  font-size: var(--pl-text-button-size);
+  line-height: var(--pl-text-button-lh);
+  font-weight: var(--pl-text-button-wt);
+  min-height: var(--pl-target);
+  min-width: var(--pl-target);
+  padding: 0 var(--pl-space-4);
+  border-radius: var(--pl-radius-button);
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: background var(--pl-motion) ease, color var(--pl-motion) ease;
+}
+.pl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pl-btn--primary {
+  background: var(--pl-primary);
+  color: var(--pl-on-primary);
+  height: var(--pl-button-height);
+  width: 100%;
+}
+.pl-btn--secondary {
+  background: var(--pl-surface);
+  color: var(--pl-primary);
+  border-color: var(--pl-primary);
+}
+.pl-btn--big { height: var(--pl-button-height); font-size: 30px; }
+.pl-btn-row { display: flex; gap: var(--pl-gap-target); flex-wrap: wrap; }
+
+/* --- Top bar: title + Stop (Stop is the one exception to one-action-per-screen) --- */
+.pl-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--pl-space-2);
+}
+.pl-topbar__title { font-weight: 700; font-size: 22px; }
+.pl-stop {
+  background: var(--pl-surface);
+  color: var(--pl-danger);
+  border: 3px solid var(--pl-danger);
+  border-radius: var(--pl-radius-button);
+  min-height: var(--pl-target); padding: 0 var(--pl-space-3);
+  font-weight: 700; font-size: var(--pl-text-button-size); cursor: pointer;
+}
+
+/* --- Screen scaffold --- */
+.pl-screen { display: flex; flex-direction: column; gap: var(--pl-space-3); flex: 1; }
+.pl-screen--center { justify-content: center; align-items: center; text-align: center; }
+.pl-card {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--pl-radius-card);
+  padding: var(--pl-space-3);
+}
+.pl-photo {
+  width: 100%; aspect-ratio: 4 / 3; border-radius: var(--pl-radius-card);
+  background: var(--pl-caption-bg);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--pl-muted); font-size: 20px; overflow: hidden;
+}
+
+/* --- Listening ring: STATIC. No pulse, no countdown (DS-T01). Dashed while speaking. --- */
+.pl-ring {
+  width: 160px; height: 160px; border-radius: 50%;
+  border: 10px solid var(--pl-primary);
+  margin: var(--pl-space-2) auto;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--pl-muted); font-size: 20px; text-align: center; padding: var(--pl-space-2);
+}
+.pl-ring[data-mode="speaking"] { border-style: dashed; }
+.pl-ring[data-mode="resting"] { border-color: var(--pl-line); }
+
+/* --- Captions: fixed height so the layout never shifts when a line arrives (DS-T06) --- */
+.pl-captions {
+  background: var(--pl-caption-bg);
+  border-radius: var(--pl-radius-card);
+  padding: var(--pl-space-2);
+  min-height: 120px;
+  font-size: var(--pl-text-caption-size);
+  line-height: var(--pl-text-caption-lh);
+  display: flex; flex-direction: column; gap: var(--pl-space-1); justify-content: flex-end;
+}
+.pl-caption__who { color: var(--pl-muted); font-size: 18px; }
+.pl-caption__line--you { color: var(--pl-text); }
+.pl-caption__line--listener { color: var(--pl-primary); font-weight: 700; }
+
+/* --- Type-to-talk input --- */
+.pl-type {
+  display: flex; gap: var(--pl-gap-target); align-items: stretch;
+}
+.pl-type input {
+  flex: 1; min-height: var(--pl-target); font-size: var(--pl-text-body-size);
+  padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line);
+  border-radius: 12px; background: var(--pl-surface); color: var(--pl-text);
+}
+
+/* --- Hint card (meaning picture -> first letter -> word) --- */
+.pl-hint { text-align: center; }
+.pl-hint__level { color: var(--pl-muted); font-size: 20px; margin-bottom: var(--pl-space-1); }
+.pl-hint__letter { font-size: 96px; font-weight: 700; color: var(--pl-primary); }
+
+/* --- Found tick (quiet, brief) --- */
+.pl-found { text-align: center; color: var(--pl-good); }
+.pl-found__tick {
+  width: 96px; height: 96px; border-radius: 50%;
+  background: var(--pl-good-bg); color: var(--pl-good);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 56px; margin: 0 auto var(--pl-space-2);
+}
+
+/* --- Being heard: loudness bar with the person's baseline marker. No numbers (DS-P02). --- */
+.pl-bar { position: relative; height: 40px; border-radius: 999px; background: var(--pl-caption-bg); overflow: hidden; }
+.pl-bar__fill { height: 100%; background: var(--pl-primary); width: 0%; transition: width var(--pl-motion) ease; }
+.pl-bar__marker { position: absolute; top: -6px; bottom: -6px; width: 4px; background: var(--pl-text); }
+.pl-bar__label { color: var(--pl-muted); font-size: 20px; margin-top: var(--pl-space-1); }
+
+/* --- Saving energy: time-used bar. Counts UP, never warns, never a countdown (DS-T01). --- */
+.pl-timebar .pl-bar__fill { background: var(--pl-line); }
+
+/* --- Need cards (P0, multi-select) --- */
+.pl-needs { display: grid; grid-template-columns: 1fr; gap: var(--pl-gap-target); }
+@media (min-width: 560px) { .pl-needs { grid-template-columns: 1fr 1fr; } }
+.pl-need {
+  display: flex; gap: var(--pl-space-2); align-items: flex-start; text-align: left;
+  padding: var(--pl-space-3); min-height: var(--pl-target);
+  border: 3px solid var(--pl-line); border-radius: var(--pl-radius-card);
+  background: var(--pl-surface); color: var(--pl-text); cursor: pointer; width: 100%;
+  font-size: var(--pl-text-body-size);
+}
+.pl-need[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); }
+.pl-need__check { font-size: 28px; color: var(--pl-primary); min-width: 32px; }
+.pl-need__title { font-weight: 700; }
+.pl-need__desc { color: var(--pl-muted); font-size: 20px; }
+
+/* --- Settings rows --- */
+.pl-setting { display: flex; flex-direction: column; gap: var(--pl-space-1); padding: var(--pl-space-2) 0; border-bottom: 1px solid var(--pl-line); }
+.pl-setting__row { display: flex; align-items: center; justify-content: space-between; gap: var(--pl-space-2); }
+.pl-pill { display: inline-flex; gap: var(--pl-space-1); }
+.pl-pill button { min-height: var(--pl-target); min-width: var(--pl-target); border-radius: 12px; border: 2px solid var(--pl-line); background: var(--pl-surface); color: var(--pl-text); font-size: 20px; cursor: pointer; }
+.pl-pill button[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
+.pl-locked { color: var(--pl-muted); font-size: 18px; }
+
+/* --- Safety card: a modal alertdialog. Danger colour here only (DS-S). --- */
+.pl-safety-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; padding: var(--pl-space-3); z-index: 50;
+}
+.pl-safety {
+  background: var(--pl-surface); border: 4px solid var(--pl-danger);
+  border-radius: var(--pl-radius-card); max-width: 560px; width: 100%;
+  padding: var(--pl-space-4); text-align: center;
+}
+.pl-safety__icon { font-size: 56px; }
+.pl-safety__title { font-size: 32px; font-weight: 700; color: var(--pl-danger); margin: var(--pl-space-2) 0; }
+.pl-safety__body { font-size: var(--pl-text-body-size); }
+.pl-safety__call {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-top: var(--pl-space-3); background: var(--pl-danger); color: #fff;
+  min-height: var(--pl-button-height); width: 100%; border-radius: var(--pl-radius-button);
+  font-size: 30px; font-weight: 700; text-decoration: none;
+}
+.pl-safety__dismiss { margin-top: var(--pl-space-2); }
+
+/* --- State banner (connecting / resting / mic blocked / offline) --- */
+.pl-state { text-align: center; }
+.pl-state__what { color: var(--pl-muted); margin-top: var(--pl-space-1); }
+
+/* --- Rest screen --- */
+.pl-rest { text-align: center; }
+
+/* --- Console (T1-T6): denser, 44px targets, 18px type --- */
+.pl-console { font-size: var(--pl-text-console-size); line-height: var(--pl-text-console-lh); max-width: 1000px; }
+.pl-console .pl-btn, .pl-console button { min-height: var(--pl-target-console); }
+.pl-grid-wrap { overflow-x: auto; }       /* wide tables scroll inside themselves, not the page */
+table.pl-grid { border-collapse: collapse; width: 100%; font-size: var(--pl-text-console-size); }
+table.pl-grid th, table.pl-grid td { border: 1px solid var(--pl-line); padding: var(--pl-space-1) var(--pl-space-2); text-align: center; }
+table.pl-grid th { background: var(--pl-caption-bg); }
+.pl-cell { font-weight: 700; }
+.pl-cell--check { color: var(--pl-good); }
+.pl-cell--hint { color: var(--pl-warn); }
+.pl-cell--none { color: var(--pl-muted); }
+.pl-tabs { display: flex; gap: var(--pl-space-1); flex-wrap: wrap; margin-bottom: var(--pl-space-2); }
+.pl-tab { min-height: var(--pl-target-console); padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line); border-radius: 10px; background: var(--pl-surface); color: var(--pl-text); cursor: pointer; font-size: var(--pl-text-console-size); }
+.pl-tab[aria-selected="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
+
+/* --- J1 judge trace --- */
+.pl-trace { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 14px; background: var(--pl-caption-bg); border-radius: var(--pl-radius-card); padding: var(--pl-space-2); max-height: 420px; overflow: auto; }
+.pl-trace__line { padding: 2px 0; border-bottom: 1px solid rgba(0,0,0,0.06); }
+.pl-trace__t { color: var(--pl-muted); }
+.pl-trace__state { color: var(--pl-primary); font-weight: 700; }
+
+/* --- Specimen page --- */
+.pl-specimen { max-width: 960px; margin: 0 auto; padding: var(--pl-space-4); }
+.pl-specimen section { margin-bottom: var(--pl-space-5); }
+.pl-specimen h2 { font-size: 24px; border-bottom: 2px solid var(--pl-line); padding-bottom: var(--pl-space-1); }
+.pl-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--pl-space-1); }
+.pl-swatch { border: 1px solid var(--pl-line); border-radius: 10px; overflow: hidden; font-size: 13px; }
+.pl-swatch__chip { height: 56px; }
+.pl-swatch__name { padding: 6px 8px; }
+.pl-theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 60; }
+
+</style>
+</head>
+<body>
+<a class="pl-visually-hidden" href="#pl-root">Skip to content</a>
+<main id="pl-root" role="main"></main>
+<script>
+/* Offline demo / replay mode: no microphone, no network. Append ?mode=judge to the URL to see
+   the J1 live trace. */
+/* Patient Listener — client. Two drivers behind one event API:
+ *   - DemoEngine: runs entirely in the browser, reproducing the server's observable behaviour
+ *     (mm at backchannel_s, offer at offer_hint_s, the hint ladder, the 0.90/0.60 match bands,
+ *     safety phrase rules). This is "replay / demo mode" (FR-90) and needs no mic or network.
+ *   - LiveDriver: opens a WebSocket to the voice endpoint and streams 16 kHz mic frames from the
+ *     AudioWorklet; the server does VAD + ASR + the real patience controller.
+ * The UI (app.js) only listens for events and calls action methods; it never knows which driver
+ * is active. Set window.PL_WS_URL to use the live driver; otherwise demo mode runs. */
+
+const PROFILES = {
+  finding_words: { backchannel_s: 4, offer_hint_s: 7, max_wait_s: 20, hints: true, feedback: 'word_found', label: 'Finding the word' },
+  words_out:     { backchannel_s: null, offer_hint_s: null, max_wait_s: 8, hints: false, needs_complete_text: true, feedback: 'words_out', label: 'Getting words started' },
+  being_heard:   { backchannel_s: 4, offer_hint_s: null, max_wait_s: 12, hints: false, feedback: 'loudness', label: 'Being loud enough' },
+  being_clear:   { backchannel_s: 5, offer_hint_s: null, max_wait_s: 12, hints: false, feedback: 'what_i_heard', label: 'Being clear' },
+  saving_energy: { backchannel_s: 5, offer_hint_s: null, max_wait_s: 20, hints: false, feedback: 'time_used', label: 'Getting tired', max_turns: 15, rest_every: 5 },
+};
+
+const DEMO_WORDS = {
+  finding_words: [
+    { id: 'w-leo', text: 'Leo', topic: 'photo: your grandson at the beach', photo: '👦 Leo', first: 'L', meaning: 'Your grandson, he is six.' },
+    { id: 'w-kettle', text: 'kettle', topic: 'photo: the kitchen', photo: '🫖 kitchen', first: 'K', meaning: 'You boil water in it.' },
+    { id: 'w-whitby', text: 'Whitby', topic: 'photo: the seaside', photo: '🏖️ seaside', first: 'W', meaning: 'The seaside town you visited.' },
+  ],
+  being_heard: [{ id: 'w-hello', text: 'good morning', topic: 'say good morning', photo: '🌅', first: 'G', meaning: '' }],
+  being_clear: [{ id: 'w-garden', text: 'the garden', topic: 'photo: the garden', photo: '🌳 garden', first: 'G', meaning: '' }],
+  saving_energy: [{ id: 'w-tea', text: 'a cup of tea', topic: 'say what you would like', photo: '☕', first: 'T', meaning: '' }],
+  words_out: [{ id: null, text: '', topic: 'tell me about your weekend', photo: '🗓️', first: '', meaning: '' }],
+};
+
+const STROKE = /\b(arm|face)\b.*\b(weak|funny|numb|droop)|\b(droop|weak|numb)\b.*\b(arm|face)|\bwords?\b.*\bworse\b|can'?t (speak|talk) like (yesterday|before)/i;
+const DISTRESS = /\bi'?m useless\b|\bwhat'?s the point\b|\bno\W+point\b|\bgive up\b/i;
+
+function _spelling(a, b) { // Dice-coefficient similarity in [0,1]
+  a = a.toLowerCase().replace(/\s+/g, ''); b = b.toLowerCase().replace(/\s+/g, '');
+  if (a === b) return 1;
+  const bg = s => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
+  const A = bg(a), B = bg(b); let inter = 0;
+  for (const [g, c] of A) if (B.has(g)) inter += Math.min(c, B.get(g));
+  const tot = (a.length - 1) + (b.length - 1);
+  return tot > 0 ? (2 * inter) / tot : 0;
+}
+function _phkey(s) { // crude phonetic key (metaphone stand-in) for the "sounds like" boost
+  s = s.toUpperCase().replace(/[^A-Z]/g, ''); if (!s) return '';
+  let out = s[0];
+  for (let i = 1; i < s.length; i++) { const c = s[i]; if ('AEIOU'.includes(c) || c === 'H') continue; if (c === out[out.length - 1]) continue; out += c; }
+  return out;
+}
+// The FR-22 match score: max(spelling, 0.6*spelling + 0.4*sound).
+function ratio(a, b) {
+  const sp = _spelling(a, b);
+  const sd = _phkey(a.replace(/\s+/g, '')) === _phkey(b.replace(/\s+/g, '')) ? 1 : 0;
+  return Math.max(sp, 0.6 * sp + 0.4 * sd);
+}
+
+class DemoEngine extends EventTarget {
+  constructor() { super(); this.profile = null; this.words = []; this.idx = 0; this.turn = 0; this.level = 0; this.pending = null; this.timers = []; this.found = []; }
+
+  _emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+  _clear() { this.timers.forEach(clearTimeout); this.timers = []; }
+  _after(ms, fn) { const id = setTimeout(fn, ms); this.timers.push(id); return id; }
+
+  setProfile(key) { this.profile = PROFILES[key]; this.words = DEMO_WORDS[key] || DEMO_WORDS.finding_words; this.profileKey = key; }
+
+  start() {
+    this.idx = 0; this.turn = 0; this.found = [];
+    this._emit('greeting', { text: `Hi Margaret. I'm an AI practice partner.`, caption: `I'm an AI practice partner.` });
+    this._after(900, () => this._nextPrompt());
+  }
+
+  _nextPrompt() {
+    this._clear(); this.level = 0; this.pending = null; this.turn += 1;
+    if (this.profile.max_turns && this.turn > this.profile.max_turns) { this.stop('done'); return; }
+    const w = this.words[this.idx % this.words.length];
+    this.current = w;
+    if (this.profile.rest_every && this.turn > 1 && (this.turn - 1) % this.profile.rest_every === 0) {
+      this._emit('restOffer', {}); return;
+    }
+    this._emit('prompt', { topic: w.topic, photo: w.photo, text: w.text ? 'What is this?' : 'Go ahead when you are ready.', profile: this.profileKey, feedback: this.profile.feedback });
+    this._emit('state', { state: 'listening' });
+  }
+
+  // The person has gone quiet; start the patience clock (demo of on_silence).
+  beginPause() {
+    this._clear();
+    this._emit('state', { state: 'silent' });
+    const p = this.profile;
+    if (p.backchannel_s != null) this._after(p.backchannel_s * 1000, () => this._emit('backchannel', { key: 'mm', caption: 'mm' }));
+    if (p.offer_hint_s != null) this._after(p.offer_hint_s * 1000, () => { this._emit('state', { state: 'hint_offered' }); this._emit('offerHint', {}); });
+    if (p.max_wait_s != null) this._after(p.max_wait_s * 1000, () => {
+      if (p.needs_complete_text) { this._emit('checkComplete', {}); }
+      else { this._emit('moveOn', {}); this._after(900, () => { this.idx += 1; this._nextPrompt(); }); }
+    });
+  }
+
+  speech() { this._clear(); this._emit('state', { state: 'listening' }); } // any sound resets the clock
+
+  help() {
+    if (!this.profile.hints) return; // never for Getting words out
+    this.level = Math.min(this.level + 1, 3);
+    const w = this.current;
+    let text;
+    if (this.level === 1) text = w.meaning;
+    else if (this.level === 2) text = `It starts with ${w.first}.`;
+    else text = `It's ${w.text}. Say it with me: ${w.text}.`;
+    this._clear();
+    this._emit('state', { state: 'hinting' });
+    this._emit('hint', { level: this.level, text, letter: w.first, word: w.text });
+  }
+
+  // Demo stand-ins for the microphone / ASR.
+  sayWord() { this._heard(this.current.text); }
+  saySoundAlike() { const map = { Leo: 'Leah', kettle: 'kettl', Whitby: 'Whitbee' }; this._heard(map[this.current.text] || this.current.text.slice(0, -1)); }
+  saySomethingElse() { this._heard('teapot'); }
+  strokePhrase() { this._heard('my arm feels funny and words are worse today'); }
+
+  typed(text) { this._heard(text); }
+
+  _heard(text) {
+    this._clear();
+    this._emit('caption', { who: 'you', text });
+    if (STROKE.test(text)) { this._emit('safety', { card: 'stroke_signs', title: 'Call 999 now', body: 'Sudden changes in speech, face or arm need help now.', number: '999' }); return; }
+    if (DISTRESS.test(text)) { this._emit('safety', { card: 'distress', title: 'You are not alone', body: 'If you are struggling, you can call Samaritans on 116 123.', number: '116 123' }); return; }
+
+    if (this.profile.feedback === 'loudness') { const strong = Math.random() > 0.5; this._emit('loudness', { strong }); this._after(800, () => { this.idx += 1; this._nextPrompt(); }); return; }
+    if (this.profile.feedback === 'what_i_heard') { this.pending = text; this._emit('whatIHeard', { text }); return; }
+    if (this.profile.needs_complete_text) {
+      const complete = !/\b(\w+)\s+\1\b/i.test(text) && text.trim().split(/\s+/).length > 1;
+      if (complete) { this._emit('reply', { text: 'Thanks. What else would you like to say?' }); this._after(900, () => { this.idx += 1; this._nextPrompt(); }); }
+      else { this._emit('state', { state: 'listening' }); }
+      return;
+    }
+    const s = ratio(text, this.current.text);
+    if (s >= 0.9) { this._found(); }
+    else if (s >= 0.6) { this.pending = this.current.text; this._emit('confirm', { word: this.current.text }); }
+    else { this._emit('reply', { text: 'Let us keep looking.' }); this._emit('state', { state: 'listening' }); }
+  }
+
+  confirmTap(ok) {
+    if (ok) { this._found(); }
+    else { this.pending = null; this._emit('state', { state: 'listening' }); }
+  }
+  answer(yes) { if (this.pending) return this.confirmTap(yes); if (yes) this.help(); else { this._emit('state', { state: 'listening' }); } }
+
+  _found() {
+    const w = this.current;
+    this.found.push(w.text);
+    this._emit('found', { word: w.text, hintLevel: this.level });
+    this._emit('attempt', { word_id: w.id, hint_level: this.level, outcome: this.level >= 3 ? 'repeated' : 'found', score: 1.0 });
+    this._after(1600, () => { this.idx += 1; this._nextPrompt(); });
+  }
+
+  done() { if (this.profile.needs_complete_text) { this._emit('reply', { text: 'Thanks.' }); this._after(600, () => { this.idx += 1; this._nextPrompt(); }); } }
+  rest() { this._emit('state', { state: 'resting' }); }
+  resume() { this.idx += 1; this._nextPrompt(); }
+  stop(reason) { this._clear(); this._emit('ended', { reason, found: this.found.slice() }); }
+}
+
+/* Live driver: WebSocket + mic + AudioWorklet. Used when window.PL_WS_URL is set. */
+class LiveDriver extends EventTarget {
+  constructor(url, token) { super(); this.url = url; this.token = token; this.ws = null; this.ctx = null; this.node = null; this.stream = null; }
+  async start() {
+    this.ws = new WebSocket(`${this.url}?token=${encodeURIComponent(this.token || '')}`);
+    this.ws.binaryType = 'arraybuffer';
+    this.ws.onopen = () => this.ws.send(JSON.stringify({ type: 'start' }));
+    this.ws.onmessage = (e) => { if (typeof e.data === 'string') { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); } };
+    this.ws.onclose = () => this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await this.ctx.audioWorklet.addModule('worklet.js');
+    const src = this.ctx.createMediaStreamSource(this.stream);
+    this.node = new AudioWorkletNode(this.ctx, 'pl-downsample', { processorOptions: { targetRate: 16000 } });
+    this.node.port.onmessage = (ev) => { if (this.ws && this.ws.readyState === 1) this.ws.send(ev.data); };
+    src.connect(this.node);
+  }
+  _send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }
+  mute(v) { if (this.node) this.node.port.postMessage({ type: 'mute', value: v }); } // half-duplex
+  help() { this._send({ type: 'help' }); }
+  answer(yes) { this._send({ type: yes ? 'yes' : 'no' }); }
+  confirmTap(ok) { this._send({ type: 'confirm_tap', ok }); }
+  typed(text) { this._send({ type: 'typed', text }); }
+  done() { this._send({ type: 'done' }); }
+  rest() { this._send({ type: 'rest' }); }
+  resume() { this._send({ type: 'resume' }); }
+  stop() { this._send({ type: 'stop' }); if (this.ws) this.ws.close(); if (this.stream) this.stream.getTracks().forEach(t => t.stop()); if (this.ctx) this.ctx.close(); }
+  // demo-only no-ops in live mode:
+  setProfile() {} beginPause() {} speech() {} sayWord() {} saySoundAlike() {} saySomethingElse() {} strokePhrase() {}
+}
+
+window.PLClient = { DemoEngine, LiveDriver, PROFILES, isLive: () => !!window.PL_WS_URL };
+
+</script>
+<script>
+/* Patient Listener — patient app (screens P0-P9, workbook: Screens & UI). Vanilla JS, no
+ * framework (D-08). Renders into #pl-root and binds to PLClient events. Accessibility: one main
+ * action per screen, captions in an aria-live region, the safety card as a modal alertdialog,
+ * visible focus, no countdowns. ?mode=judge adds the J1 live trace. */
+
+(function () {
+  const root = document.getElementById('pl-root');
+  const live = window.PLClient.isLive();
+  const judge = new URLSearchParams(location.search).get('mode') === 'judge';
+
+  const state = {
+    route: 'P0',
+    needs: new Set(),
+    waits: { backchannel: 4, offer: 7, max: 20, endByDone: false, sessionMin: 20 },
+    feedback: 'word_found',
+    captions: [],
+    today: [],
+    prompt: null,
+    hint: null,
+    confirmWord: null,
+    whatIHeard: null,
+    loudness: null,
+    safety: null,
+    ringMode: 'listening',
+    ended: null,
+    trace: [],
+    t0: Date.now(),
+  };
+
+  let client = null;
+
+  // ---- tiny DOM helper ----
+  function h(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    for (const k in (attrs || {})) {
+      if (k === 'class') e.className = attrs[k];
+      else if (k === 'html') e.innerHTML = attrs[k];
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), attrs[k]);
+      else if (attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]);
+    }
+    for (const kid of kids.flat()) if (kid != null) e.append(kid.nodeType ? kid : document.createTextNode(kid));
+    return e;
+  }
+
+  function speakable(text) { // caption + optional voice (off by default)
+    return text;
+  }
+
+  // ---- client wiring ----
+  function makeClient() {
+    const c = live ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
+                   : new window.PLClient.DemoEngine();
+    if (!live) c.setProfile([...state.needs][0] || 'finding_words');
+    const on = (type, fn) => c.addEventListener(type, (e) => { trace(type, e.detail); fn(e.detail); });
+
+    on('greeting', (d) => { pushCaption('listener', d.caption); });
+    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
+    on('state', (d) => { state.ringMode = d.state; updateRing(); });
+    on('backchannel', (d) => { pushCaption('listener', d.caption); });
+    on('offerHint', () => { state.ringMode = 'hint_offered'; pushCaption('listener', 'Want a hint?'); state.offerHint = true; show('P3'); });
+    on('hint', (d) => { state.hint = d; state.offerHint = false; pushCaption('listener', d.text); show('P3'); });
+    on('confirm', (d) => { state.confirmWord = d.word; pushCaption('listener', `Did you say ${d.word}?`); show('P3'); });
+    on('found', (d) => { state.today.push(d.word); flashFound(d.word); });
+    on('loudness', (d) => { state.loudness = d.strong ? 'ok' : 'soft'; if (!d.strong) pushCaption('listener', 'A bit stronger?'); show('P3'); });
+    on('whatIHeard', (d) => { state.whatIHeard = d.text; show('P3'); });
+    on('reply', (d) => { pushCaption('listener', d.text); });
+    on('moveOn', () => { pushCaption('listener', "Let's try another."); });
+    on('restOffer', () => { show('REST'); });
+    on('checkComplete', () => { /* keep waiting quietly (Getting words out) */ });
+    on('safety', (d) => { state.safety = d; show('P8'); });
+    on('ended', (d) => { state.ended = d; show('END'); });
+    on('attempt', () => {});
+    return c;
+  }
+
+  function pushCaption(who, text) {
+    state.captions.push({ who, text });
+    state.captions = state.captions.slice(-6);
+    const strip = document.getElementById('pl-captions');
+    if (strip) renderCaptions(strip);
+  }
+
+  function updateRing() { const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', ['speaking', 'hinting'].includes(state.ringMode) ? 'speaking' : state.ringMode === 'resting' ? 'resting' : 'listening'); }
+
+  function flashFound(word) {
+    show('P5');
+    setTimeout(() => { if (state.route === 'P5') show('P3'); }, 1600);
+  }
+
+  function trace(type, detail) {
+    if (!judge) return;
+    const t = ((Date.now() - state.t0) / 1000).toFixed(1);
+    state.trace.push({ t, type, detail });
+    const box = document.getElementById('pl-trace');
+    if (box) renderTrace(box);
+  }
+
+  // ---- routing ----
+  function show(route) { state.route = route; render(); }
+
+  function render() {
+    root.innerHTML = '';
+    const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
+    app.append(themeToggle());
+    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, REST: screenRest, END: screenEnd, P9: screenP9 };
+    (screens[state.route] || screenP0)(app);
+    root.append(app);
+    if (state.route === 'P8' && state.safety) overlaySafety();
+    if (judge) root.append(judgePanel());
+    focusMain();
+  }
+
+  function focusMain() {
+    const t = root.querySelector('[data-autofocus]');
+    if (t) t.focus();
+  }
+
+  // ---- shared chrome ----
+  function disclosure() {
+    return h('p', { class: 'pl-disclosure' }, h('span', { 'aria-hidden': 'true' }, '🤖 '), "I'm an AI practice partner.");
+  }
+  function topbar() {
+    return h('div', { class: 'pl-topbar' },
+      h('div', { class: 'pl-topbar__title' }, state.prompt ? (window.PLClient.PROFILES[[...state.needs][0]] ? window.PLClient.PROFILES[[...state.needs][0]].label : 'Practice') : 'Practice'),
+      h('button', { class: 'pl-stop', onclick: endSession, 'aria-label': 'Stop practice' }, '■ Stop'),
+    );
+  }
+  function renderCaptions(strip) {
+    strip.innerHTML = '';
+    for (const c of state.captions) {
+      strip.append(h('div', {},
+        h('span', { class: 'pl-caption__who' }, c.who === 'you' ? 'You: ' : 'Listener: '),
+        h('span', { class: 'pl-caption__line--' + c.who }, c.text)));
+    }
+  }
+
+  // ---- P0: needs picker ----
+  function screenP0(app) {
+    const NEEDS = [
+      ['finding_words', 'Finding the word', 'I know what I mean but the word will not come. I will wait, and help only if you ask.'],
+      ['words_out', 'Getting words started', 'The words get stuck at the start. I will stay quiet and never rush you.'],
+      ['being_heard', 'Being loud enough', 'My voice is quiet. I will show you when to give a little more.'],
+      ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.'],
+      ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.'],
+    ];
+    const grid = h('div', { class: 'pl-needs', role: 'group', 'aria-label': 'What is hard right now? Pick any.' });
+    NEEDS.forEach(([key, title, desc], i) => {
+      const pressed = state.needs.has(key);
+      grid.append(h('button', {
+        class: 'pl-need', 'aria-pressed': String(pressed), 'data-autofocus': i === 0 ? '' : null,
+        onclick: () => { pressed ? state.needs.delete(key) : state.needs.add(key); render(); },
+      },
+        h('span', { class: 'pl-need__check', 'aria-hidden': 'true' }, pressed ? '✓' : '○'),
+        h('span', {}, h('span', { class: 'pl-need__title' }, title), h('br'), h('span', { class: 'pl-need__desc' }, desc)),
+      ));
+    });
+    app.append(
+      h('h1', { class: 'pl-prompt' }, 'What is hard right now?'),
+      h('p', { class: 'pl-muted' }, 'Pick any that fit. You can change this later. No diagnosis needed.'),
+      grid,
+      h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!live) { client = makeClient(); } show('P1'); } } }, 'Next'),
+      disclosure(),
+    );
+  }
+
+  // ---- P1: start ----
+  function screenP1(app) {
+    app.append(
+      h('div', { class: 'pl-screen pl-screen--center' },
+        h('h1', { class: 'pl-prompt' }, 'Hi Margaret.'),
+        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, '▶ Start talking'),
+        h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.waits.sessionMin = 5; show('P2'); } }, 'Short chat (5 minutes)'),
+        disclosure(),
+      ));
+  }
+
+  // ---- P2: mic check ----
+  function screenP2(app) {
+    app.append(
+      h('div', { class: 'pl-screen pl-screen--center' },
+        h('h1', { class: 'pl-prompt' }, 'Can you hear me?'),
+        h('p', { class: 'pl-muted' }, live ? 'Tap to allow the microphone, then say hello.' : 'Demo mode: no microphone needed.'),
+        h('div', { class: 'pl-ring', 'aria-hidden': 'true' }, '🔊'),
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, 'Yes, start'),
+      ));
+  }
+
+  async function beginSession() {
+    if (!client) client = makeClient();
+    state.captions = []; state.today = [];
+    if (live) { try { await client.start(); } catch (e) { state.safety = null; show('P9'); return; } }
+    else { client.start(); }
+  }
+
+  // ---- P3 / P3b: talk ----
+  function screenP3(app) {
+    app.append(topbar());
+    const p = state.prompt || { topic: '', photo: '🖼️', text: 'Take your time.' };
+    const profile = [...state.needs][0] || 'finding_words';
+
+    // Prompt + photo
+    app.append(h('div', { class: 'pl-card' },
+      h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
+      h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') })));
+
+    // Profile-specific feedback area (P3b)
+    if (state.feedback === 'loudness') app.append(loudnessBar());
+    if (state.feedback === 'time_used') app.append(timeBar());
+    if (state.feedback === 'what_i_heard' && state.whatIHeard) app.append(whatIHeardCard());
+
+    // Ring (static; a timer is never shown)
+    const ringLabel = profile === 'words_out' ? 'I am listening. Take all the time you need.' : 'Listening';
+    app.append(h('div', { id: 'pl-ring', class: 'pl-ring', 'data-mode': state.ringMode, role: 'status', 'aria-label': ringLabel }, ringLabel));
+
+    // Hint area (P4)
+    if (state.hint) app.append(hintCard());
+
+    // Captions (aria-live)
+    const strip = h('div', { id: 'pl-captions', class: 'pl-captions', 'aria-live': 'polite', 'aria-atomic': 'false' });
+    renderCaptions(strip);
+    app.append(h('div', {}, h('span', { class: 'pl-visually-hidden' }, 'Conversation captions'), strip));
+
+    // Actions: one main action per profile + Stop (in the topbar)
+    const row = h('div', { class: 'pl-btn-row' });
+    if (state.confirmWord) {
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.confirmWord = null; client.answer(true); } }, `Yes, ${state.confirmWord}`));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.confirmWord = null; client.answer(false); } }, 'No'));
+    } else if (state.offerHint) {
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.offerHint = false; client.answer(true); } }, 'Yes, a hint'));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.offerHint = false; client.answer(false); } }, 'No, keep going'));
+    } else if (state.feedback === 'what_i_heard' && state.whatIHeard) {
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.whatIHeard = null; client.confirmTap(true); } }, '✓ That is right'));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.whatIHeard = null; client.confirmTap(false); } }, '✎ Not quite'));
+    } else {
+      if (profile === 'words_out') row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => client.done() }, '✓ Done'));
+      else if (profile !== 'being_heard' && profile !== 'being_clear' && profile !== 'saving_energy')
+        row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.help() }, '💡 Help'));
+      if (profile === 'saving_energy') row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.rest() }, '☕ Rest'));
+    }
+    app.append(row);
+
+    if (!live) app.append(demoControls(profile));
+  }
+
+  function hintCard() {
+    const d = state.hint;
+    const body = d.level === 2
+      ? h('div', { class: 'pl-hint__letter', 'aria-hidden': 'true' }, d.letter)
+      : h('p', { class: 'pl-hint-text' }, d.text);
+    return h('div', { class: 'pl-card pl-hint' },
+      h('div', { class: 'pl-hint__level' }, `Hint ${d.level} of 3`),
+      body,
+      d.level === 2 ? h('p', { class: 'pl-hint-text' }, d.text) : null,
+    );
+  }
+
+  function loudnessBar() {
+    const pct = state.loudness === 'ok' ? 80 : state.loudness === 'soft' ? 35 : 55;
+    return h('div', { class: 'pl-card' },
+      h('p', { class: 'pl-prompt' }, state.loudness === 'soft' ? 'A bit stronger?' : 'Good and clear.'),
+      h('div', { class: 'pl-bar', role: 'img', 'aria-label': state.loudness === 'soft' ? 'Your voice is below your usual level' : 'Your voice is at a good level' },
+        h('div', { class: 'pl-bar__fill', style: `width:${pct}%` }),
+        h('div', { class: 'pl-bar__marker', style: 'left:60%' })),
+      h('div', { class: 'pl-bar__label' }, 'The line is your usual strong voice.'));
+  }
+
+  function timeBar() {
+    const used = Math.min(100, (state.today.length / 8) * 100);
+    return h('div', { class: 'pl-card' },
+      h('div', { class: 'pl-bar pl-timebar', role: 'img', 'aria-label': 'Time used so far this session' },
+        h('div', { class: 'pl-bar__fill', style: `width:${used}%` })),
+      h('div', { class: 'pl-bar__label' }, 'Time used. Stop whenever you like.'));
+  }
+
+  function whatIHeardCard() {
+    return h('div', { class: 'pl-card' },
+      h('div', { class: 'pl-hint__level' }, 'What I heard'),
+      h('p', { class: 'pl-hint-text' }, `“${state.whatIHeard}”`));
+  }
+
+  // Demo-only controls standing in for the microphone / ASR.
+  function demoControls(profile) {
+    const mk = (label, fn) => h('button', { class: 'pl-tab', onclick: fn }, label);
+    const row = h('div', { class: 'pl-tabs', style: 'margin-top:16px' });
+    row.append(h('span', { class: 'pl-locked' }, 'Demo controls (stand in for the mic): '));
+    row.append(mk('⏸ pause', () => client.beginPause()));
+    if (profile !== 'words_out') row.append(mk('🎤 say the word', () => client.sayWord()));
+    if (profile === 'finding_words') row.append(mk('🎤 say a close word', () => client.saySoundAlike()));
+    if (profile === 'finding_words') row.append(mk('🎤 say something else', () => client.saySomethingElse()));
+    if (profile === 'words_out' || profile === 'being_heard' || profile === 'being_clear' || profile === 'saving_energy') row.append(mk('🎤 speak', () => client.typed(profile === 'words_out' ? 'I had a good weekend thanks' : 'hello there')));
+    if (profile === 'words_out') row.append(mk('🎤 get stuck', () => client.typed('I I I')));
+    row.append(mk('⚠ say a stroke phrase', () => client.strokePhrase()));
+    return row;
+  }
+
+  // ---- P5: found (quiet, brief) ----
+  function screenP5(app) {
+    const word = state.today[state.today.length - 1] || '';
+    app.append(h('div', { class: 'pl-screen pl-screen--center pl-found' },
+      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, '✓'),
+      h('p', { class: 'pl-hint-text' }, `Yes — ${word}.`)));
+  }
+
+  // ---- P6 / END: today ----
+  function screenEnd(app) {
+    const found = (state.ended && state.ended.found) || state.today;
+    app.append(h('div', { class: 'pl-screen pl-screen--center' },
+      h('h1', { class: 'pl-prompt' }, 'Well done today.'),
+      h('div', { class: 'pl-card', style: 'width:100%' },
+        h('p', { class: 'pl-muted' }, found.length ? 'Words you found:' : 'Thanks for practising.'),
+        h('p', { class: 'pl-hint-text' }, found.join(', ') || '—')),
+      h('p', { class: 'pl-disclosure' }, 'If speech, face or arm change suddenly, call 999. For slower changes, talk to your doctor or speech therapist.'),
+      h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P0') }, 'Back to start')));
+  }
+  function screenP6(app) { screenEnd(app); }
+
+  // ---- REST ----
+  function screenRest(app) {
+    app.append(h('div', { class: 'pl-screen pl-screen--center pl-rest' },
+      h('h1', { class: 'pl-prompt' }, 'Take a rest.'),
+      h('p', { class: 'pl-muted' }, 'No rush. Come back whenever you are ready.'),
+      h('div', { class: 'pl-btn-row' },
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { client.resume(); } }, 'Keep going'),
+        h('button', { class: 'pl-btn pl-btn--secondary', onclick: endSession }, 'Finish for now'))));
+  }
+
+  // ---- P7: settings ----
+  function screenP7(app) {
+    const w = state.waits;
+    const pill = (label, active, fn) => h('button', { 'aria-pressed': String(active), onclick: fn }, label);
+    app.append(
+      topbar(),
+      h('h1', { class: 'pl-prompt' }, 'Settings'),
+      h('p', { class: 'pl-muted' }, 'You can always make waits longer or switch them off. No PIN needed for these.'),
+      h('div', { class: 'pl-setting' },
+        h('div', { class: 'pl-setting__row' }, h('span', {}, 'How long I wait before a gentle “mm”'),
+          h('span', { class: 'pl-pill' }, pill('4s', w.backchannel === 4, () => { w.backchannel = 4; render(); }), pill('6s', w.backchannel === 6, () => { w.backchannel = 6; render(); }), pill('10s', w.backchannel === 10, () => { w.backchannel = 10; render(); }), pill('Never', w.backchannel === null, () => { w.backchannel = null; render(); })))),
+      h('div', { class: 'pl-setting' },
+        h('div', { class: 'pl-setting__row' }, h('span', {}, 'End my turn for me'),
+          h('span', { class: 'pl-pill' }, pill('After a wait', !w.endByDone, () => { w.endByDone = false; render(); }), pill("Never — I'll tap Done", w.endByDone, () => { w.endByDone = true; render(); })))),
+      h('div', { class: 'pl-setting' },
+        h('div', { class: 'pl-setting__row' }, h('span', {}, 'Session length'),
+          h('span', { class: 'pl-pill' }, pill('10 min', w.sessionMin === 10, () => { w.sessionMin = 10; render(); }), pill('20 min', w.sessionMin === 20, () => { w.sessionMin = 20; render(); }), pill('No limit', w.sessionMin === null, () => { w.sessionMin = null; render(); })))),
+      h('div', { class: 'pl-setting' },
+        h('p', { class: 'pl-locked' }, '🔒 Needs, hint timing, shortening limits and consent are behind your helper’s PIN.')),
+      h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show(state.prompt ? 'P3' : 'P1') }, 'Done'),
+    );
+  }
+
+  // ---- P8: safety overlay (alertdialog) ----
+  function overlaySafety() {
+    const s = state.safety;
+    const backdrop = h('div', { class: 'pl-safety-backdrop' });
+    const dlg = h('div', { class: 'pl-safety', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'pl-safety-title', 'aria-describedby': 'pl-safety-body', tabindex: '-1' },
+      h('div', { class: 'pl-safety__icon', 'aria-hidden': 'true' }, s.card === 'stroke_signs' ? '🚑' : '💛'),
+      h('h2', { id: 'pl-safety-title', class: 'pl-safety__title' }, s.title),
+      h('p', { id: 'pl-safety-body', class: 'pl-safety__body' }, s.body),
+      s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, `📞 Call ${s.number}`) : null,
+      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: () => { state.safety = null; render(); } }, "I'm OK, close"),
+    );
+    backdrop.append(dlg);
+    root.append(backdrop);
+    setTimeout(() => dlg.focus(), 0);
+    // Speak the safety line once (assistive).
+    try { if (window.speechSynthesis && s.card === 'stroke_signs') { const u = new SpeechSynthesisUtterance(`${s.title}. ${s.body}`); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } } catch (e) {}
+    // Minimal focus trap.
+    backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { state.safety = null; render(); } });
+  }
+
+  // ---- P9: states ----
+  function screenP9(app) {
+    app.append(h('div', { class: 'pl-screen pl-screen--center pl-state' },
+      h('div', { class: 'pl-ring', 'data-mode': 'resting', 'aria-hidden': 'true' }, '…'),
+      h('h1', { class: 'pl-prompt' }, 'Microphone is blocked'),
+      h('p', { class: 'pl-state__what' }, 'Allow the microphone in your browser, then tap below.'),
+      h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again')));
+  }
+
+  // ---- theme toggle ----
+  function themeToggle() {
+    const cur = document.documentElement.getAttribute('data-theme') || 'system';
+    const next = { system: 'light', light: 'dark', dark: 'system' };
+    return h('button', { class: 'pl-tab pl-theme-toggle', onclick: () => { const n = next[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n); render(); }, 'aria-label': `Theme: ${cur}. Tap to change.` }, cur === 'dark' ? '🌙' : cur === 'light' ? '☀️' : '🌗');
+  }
+
+  // ---- judge J1 trace ----
+  function judgePanel() {
+    const box = h('div', { class: 'pl-app', style: 'margin-top:8px' },
+      h('h2', { class: 'pl-topbar__title' }, 'J1 — live trace (judge mode)'),
+      h('p', { class: 'pl-muted' }, live ? `Live: ${window.PL_WS_URL}` : 'Demo / replay mode — no model is called.'),
+      h('div', { id: 'pl-trace', class: 'pl-trace' }));
+    setTimeout(() => { const t = document.getElementById('pl-trace'); if (t) renderTrace(t); }, 0);
+    return box;
+  }
+  function renderTrace(box) {
+    box.innerHTML = '';
+    for (const r of state.trace.slice(-60)) {
+      box.append(h('div', { class: 'pl-trace__line' },
+        h('span', { class: 'pl-trace__t' }, `[${r.t}s] `),
+        h('span', { class: 'pl-trace__state' }, r.type),
+        ' ', h('span', {}, summarise(r.detail))));
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+  function summarise(d) {
+    if (!d) return '';
+    if (d.state) return d.state;
+    if (d.word) return d.word + (d.hintLevel != null ? ` (hint ${d.hintLevel})` : '');
+    if (d.text) return JSON.stringify(d.text).slice(0, 48);
+    if (d.card) return d.card;
+    return '';
+  }
+
+  function endSession() { if (client) client.stop('stop'); state.ended = state.ended || { found: state.today.slice() }; show('END'); }
+
+  // ---- boot ----
+  render();
+})();
+
+</script>
+</body>
+</html>

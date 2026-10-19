@@ -1,0 +1,268 @@
+/* Patient Listener — components & screens. Uses only tokens.css for colour/type/space.
+   Rules enforced here: 64px targets + 16px gaps (DS-A03), visible focus (DS-A04), colour never
+   alone (DS-A05), no layout shift during speech (DS-T06), no countdown/timer except the
+   time-used bar (DS-T01), content centred <= 720px (DS-A08), 200% zoom & 320px with no sideways
+   scroll (DS-A03). */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--pl-page);
+  color: var(--pl-text);
+  font-family: var(--pl-font);
+  font-size: var(--pl-text-body-size);
+  line-height: var(--pl-text-body-lh);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Everything flows in a single centred column; nothing exceeds the viewport width. */
+.pl-app {
+  max-width: var(--pl-content-max);
+  margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: var(--pl-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+img, svg, canvas { max-width: 100%; height: auto; }
+
+/* --- Focus: always visible (DS-A04) --- */
+:focus-visible {
+  outline: var(--pl-focus-width) solid var(--pl-primary);
+  outline-offset: var(--pl-focus-offset);
+  border-radius: 6px;
+}
+
+.pl-visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+
+/* --- Typography roles --- */
+.pl-prompt {
+  font-size: var(--pl-text-prompt-size);
+  line-height: var(--pl-text-prompt-lh);
+  font-weight: var(--pl-text-prompt-wt);
+  margin: 0;
+}
+.pl-prompt b, .pl-prompt strong { color: var(--pl-primary); }  /* the one key word (DS-C08) */
+.pl-hint-text {
+  font-size: var(--pl-text-hint-size);
+  line-height: var(--pl-text-hint-lh);
+  font-weight: var(--pl-text-hint-wt);
+  margin: 0;
+}
+.pl-muted { color: var(--pl-muted); }
+.pl-disclosure {               /* "I'm an AI practice partner" (DS-C06) */
+  color: var(--pl-muted);
+  font-size: var(--pl-text-body-size);
+  display: flex; align-items: center; gap: var(--pl-space-1);
+}
+
+/* --- Buttons: min 64px, big radius, 72px tall for primary --- */
+.pl-btn {
+  font-family: var(--pl-font);
+  font-size: var(--pl-text-button-size);
+  line-height: var(--pl-text-button-lh);
+  font-weight: var(--pl-text-button-wt);
+  min-height: var(--pl-target);
+  min-width: var(--pl-target);
+  padding: 0 var(--pl-space-4);
+  border-radius: var(--pl-radius-button);
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: background var(--pl-motion) ease, color var(--pl-motion) ease;
+}
+.pl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pl-btn--primary {
+  background: var(--pl-primary);
+  color: var(--pl-on-primary);
+  height: var(--pl-button-height);
+  width: 100%;
+}
+.pl-btn--secondary {
+  background: var(--pl-surface);
+  color: var(--pl-primary);
+  border-color: var(--pl-primary);
+}
+.pl-btn--big { height: var(--pl-button-height); font-size: 30px; }
+.pl-btn-row { display: flex; gap: var(--pl-gap-target); flex-wrap: wrap; }
+
+/* --- Top bar: title + Stop (Stop is the one exception to one-action-per-screen) --- */
+.pl-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--pl-space-2);
+}
+.pl-topbar__title { font-weight: 700; font-size: 22px; }
+.pl-stop {
+  background: var(--pl-surface);
+  color: var(--pl-danger);
+  border: 3px solid var(--pl-danger);
+  border-radius: var(--pl-radius-button);
+  min-height: var(--pl-target); padding: 0 var(--pl-space-3);
+  font-weight: 700; font-size: var(--pl-text-button-size); cursor: pointer;
+}
+
+/* --- Screen scaffold --- */
+.pl-screen { display: flex; flex-direction: column; gap: var(--pl-space-3); flex: 1; }
+.pl-screen--center { justify-content: center; align-items: center; text-align: center; }
+.pl-card {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--pl-radius-card);
+  padding: var(--pl-space-3);
+}
+.pl-photo {
+  width: 100%; aspect-ratio: 4 / 3; border-radius: var(--pl-radius-card);
+  background: var(--pl-caption-bg);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--pl-muted); font-size: 20px; overflow: hidden;
+}
+
+/* --- Listening ring: STATIC. No pulse, no countdown (DS-T01). Dashed while speaking. --- */
+.pl-ring {
+  width: 160px; height: 160px; border-radius: 50%;
+  border: 10px solid var(--pl-primary);
+  margin: var(--pl-space-2) auto;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--pl-muted); font-size: 20px; text-align: center; padding: var(--pl-space-2);
+}
+.pl-ring[data-mode="speaking"] { border-style: dashed; }
+.pl-ring[data-mode="resting"] { border-color: var(--pl-line); }
+
+/* --- Captions: fixed height so the layout never shifts when a line arrives (DS-T06) --- */
+.pl-captions {
+  background: var(--pl-caption-bg);
+  border-radius: var(--pl-radius-card);
+  padding: var(--pl-space-2);
+  min-height: 120px;
+  font-size: var(--pl-text-caption-size);
+  line-height: var(--pl-text-caption-lh);
+  display: flex; flex-direction: column; gap: var(--pl-space-1); justify-content: flex-end;
+}
+.pl-caption__who { color: var(--pl-muted); font-size: 18px; }
+.pl-caption__line--you { color: var(--pl-text); }
+.pl-caption__line--listener { color: var(--pl-primary); font-weight: 700; }
+
+/* --- Type-to-talk input --- */
+.pl-type {
+  display: flex; gap: var(--pl-gap-target); align-items: stretch;
+}
+.pl-type input {
+  flex: 1; min-height: var(--pl-target); font-size: var(--pl-text-body-size);
+  padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line);
+  border-radius: 12px; background: var(--pl-surface); color: var(--pl-text);
+}
+
+/* --- Hint card (meaning picture -> first letter -> word) --- */
+.pl-hint { text-align: center; }
+.pl-hint__level { color: var(--pl-muted); font-size: 20px; margin-bottom: var(--pl-space-1); }
+.pl-hint__letter { font-size: 96px; font-weight: 700; color: var(--pl-primary); }
+
+/* --- Found tick (quiet, brief) --- */
+.pl-found { text-align: center; color: var(--pl-good); }
+.pl-found__tick {
+  width: 96px; height: 96px; border-radius: 50%;
+  background: var(--pl-good-bg); color: var(--pl-good);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 56px; margin: 0 auto var(--pl-space-2);
+}
+
+/* --- Being heard: loudness bar with the person's baseline marker. No numbers (DS-P02). --- */
+.pl-bar { position: relative; height: 40px; border-radius: 999px; background: var(--pl-caption-bg); overflow: hidden; }
+.pl-bar__fill { height: 100%; background: var(--pl-primary); width: 0%; transition: width var(--pl-motion) ease; }
+.pl-bar__marker { position: absolute; top: -6px; bottom: -6px; width: 4px; background: var(--pl-text); }
+.pl-bar__label { color: var(--pl-muted); font-size: 20px; margin-top: var(--pl-space-1); }
+
+/* --- Saving energy: time-used bar. Counts UP, never warns, never a countdown (DS-T01). --- */
+.pl-timebar .pl-bar__fill { background: var(--pl-line); }
+
+/* --- Need cards (P0, multi-select) --- */
+.pl-needs { display: grid; grid-template-columns: 1fr; gap: var(--pl-gap-target); }
+@media (min-width: 560px) { .pl-needs { grid-template-columns: 1fr 1fr; } }
+.pl-need {
+  display: flex; gap: var(--pl-space-2); align-items: flex-start; text-align: left;
+  padding: var(--pl-space-3); min-height: var(--pl-target);
+  border: 3px solid var(--pl-line); border-radius: var(--pl-radius-card);
+  background: var(--pl-surface); color: var(--pl-text); cursor: pointer; width: 100%;
+  font-size: var(--pl-text-body-size);
+}
+.pl-need[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); }
+.pl-need__check { font-size: 28px; color: var(--pl-primary); min-width: 32px; }
+.pl-need__title { font-weight: 700; }
+.pl-need__desc { color: var(--pl-muted); font-size: 20px; }
+
+/* --- Settings rows --- */
+.pl-setting { display: flex; flex-direction: column; gap: var(--pl-space-1); padding: var(--pl-space-2) 0; border-bottom: 1px solid var(--pl-line); }
+.pl-setting__row { display: flex; align-items: center; justify-content: space-between; gap: var(--pl-space-2); }
+.pl-pill { display: inline-flex; gap: var(--pl-space-1); }
+.pl-pill button { min-height: var(--pl-target); min-width: var(--pl-target); border-radius: 12px; border: 2px solid var(--pl-line); background: var(--pl-surface); color: var(--pl-text); font-size: 20px; cursor: pointer; }
+.pl-pill button[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
+.pl-locked { color: var(--pl-muted); font-size: 18px; }
+
+/* --- Safety card: a modal alertdialog. Danger colour here only (DS-S). --- */
+.pl-safety-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; padding: var(--pl-space-3); z-index: 50;
+}
+.pl-safety {
+  background: var(--pl-surface); border: 4px solid var(--pl-danger);
+  border-radius: var(--pl-radius-card); max-width: 560px; width: 100%;
+  padding: var(--pl-space-4); text-align: center;
+}
+.pl-safety__icon { font-size: 56px; }
+.pl-safety__title { font-size: 32px; font-weight: 700; color: var(--pl-danger); margin: var(--pl-space-2) 0; }
+.pl-safety__body { font-size: var(--pl-text-body-size); }
+.pl-safety__call {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-top: var(--pl-space-3); background: var(--pl-danger); color: #fff;
+  min-height: var(--pl-button-height); width: 100%; border-radius: var(--pl-radius-button);
+  font-size: 30px; font-weight: 700; text-decoration: none;
+}
+.pl-safety__dismiss { margin-top: var(--pl-space-2); }
+
+/* --- State banner (connecting / resting / mic blocked / offline) --- */
+.pl-state { text-align: center; }
+.pl-state__what { color: var(--pl-muted); margin-top: var(--pl-space-1); }
+
+/* --- Rest screen --- */
+.pl-rest { text-align: center; }
+
+/* --- Console (T1-T6): denser, 44px targets, 18px type --- */
+.pl-console { font-size: var(--pl-text-console-size); line-height: var(--pl-text-console-lh); max-width: 1000px; }
+.pl-console .pl-btn, .pl-console button { min-height: var(--pl-target-console); }
+.pl-grid-wrap { overflow-x: auto; }       /* wide tables scroll inside themselves, not the page */
+table.pl-grid { border-collapse: collapse; width: 100%; font-size: var(--pl-text-console-size); }
+table.pl-grid th, table.pl-grid td { border: 1px solid var(--pl-line); padding: var(--pl-space-1) var(--pl-space-2); text-align: center; }
+table.pl-grid th { background: var(--pl-caption-bg); }
+.pl-cell { font-weight: 700; }
+.pl-cell--check { color: var(--pl-good); }
+.pl-cell--hint { color: var(--pl-warn); }
+.pl-cell--none { color: var(--pl-muted); }
+.pl-tabs { display: flex; gap: var(--pl-space-1); flex-wrap: wrap; margin-bottom: var(--pl-space-2); }
+.pl-tab { min-height: var(--pl-target-console); padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line); border-radius: 10px; background: var(--pl-surface); color: var(--pl-text); cursor: pointer; font-size: var(--pl-text-console-size); }
+.pl-tab[aria-selected="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
+
+/* --- J1 judge trace --- */
+.pl-trace { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 14px; background: var(--pl-caption-bg); border-radius: var(--pl-radius-card); padding: var(--pl-space-2); max-height: 420px; overflow: auto; }
+.pl-trace__line { padding: 2px 0; border-bottom: 1px solid rgba(0,0,0,0.06); }
+.pl-trace__t { color: var(--pl-muted); }
+.pl-trace__state { color: var(--pl-primary); font-weight: 700; }
+
+/* --- Specimen page --- */
+.pl-specimen { max-width: 960px; margin: 0 auto; padding: var(--pl-space-4); }
+.pl-specimen section { margin-bottom: var(--pl-space-5); }
+.pl-specimen h2 { font-size: 24px; border-bottom: 2px solid var(--pl-line); padding-bottom: var(--pl-space-1); }
+.pl-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--pl-space-1); }
+.pl-swatch { border: 1px solid var(--pl-line); border-radius: 10px; overflow: hidden; font-size: 13px; }
+.pl-swatch__chip { height: 56px; }
+.pl-swatch__name { padding: 6px 8px; }
+.pl-theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 60; }

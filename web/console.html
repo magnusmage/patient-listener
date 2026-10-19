@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Patient Listener — therapist console</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <button class="pl-tab pl-theme-toggle" id="theme">🌗 theme</button>
+  <main id="root" class="pl-app pl-console" role="main"></main>
+
+  <script>
+  // Mock data (offline). In production these come from the app API (GET /console/...).
+  const DATA = {
+    therapist: { name: 'Sam (SLT)', mfa: new URLSearchParams(location.search).get('mode') === 'judge' ? false : true },
+    caseload: [
+      { id: 'margaret', name: 'Margaret', needs: ['Finding the word'], last: 'Today', returned: 9 },
+      { id: 'daniyal', name: 'Daniyal', needs: ['Getting words started'], last: 'Yesterday', returned: 5 },
+      { id: 'joseph', name: 'Joseph', needs: ['Being loud enough'], last: '2 days ago', returned: 7 },
+    ],
+    words: {
+      margaret: [
+        { id: 'w-leo', text: 'Leo', kind: 'person', cue: "Leo's your grandson, he's six", first: 'L', status: 'approved', by: 'slt' },
+        { id: 'w-kettle', text: 'kettle', kind: 'object', cue: 'you boil water in it', first: 'K', status: 'approved', by: 'slt' },
+        { id: 'w-whitby', text: 'Whitby', kind: 'place', cue: 'the seaside town', first: 'W', status: 'approved', by: 'slt' },
+        { id: 'w-rex', text: 'Rex', kind: 'person', cue: "Leo's new puppy", first: 'R', status: 'draft', by: 'carer' },
+      ],
+    },
+    grid: {
+      margaret: { days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+        rows: [
+          { word: 'Leo', cells: ['check', 'sound', 'none', 'check', 'check'] },
+          { word: 'kettle', cells: ['meaning', 'check', 'check', 'word', 'check'] },
+          { word: 'Whitby', cells: ['none', 'meaning', 'meaning', 'sound', 'check'] },
+        ] },
+    },
+    settings: { margaret: { needs: ['Finding the word'], hintOrder: 'meaning-first', hintWait: 7, sessionMin: 20 } },
+    consent: { margaret: { tellCarerLowMood: false, dataSharing: true } },
+  };
+  const CELL = { check: ['✓', 'pl-cell--check', 'found with no hint'], meaning: ['M', 'pl-cell--hint', 'found after meaning hint'], sound: ['S', 'pl-cell--hint', 'found after sound hint'], word: ['W', 'pl-cell--hint', 'found after hearing the word'], none: ['–', 'pl-cell--none', 'not tried'] };
+
+  const root = document.getElementById('root');
+  const S = { signedIn: false, tab: 'T2', person: 'margaret' };
+
+  function h(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    for (const k in (attrs || {})) { if (k === 'class') e.className = attrs[k]; else if (k === 'html') e.innerHTML = attrs[k]; else if (k.startsWith('on')) e.addEventListener(k.slice(2), attrs[k]); else if (attrs[k] != null) e.setAttribute(k, attrs[k]); }
+    for (const kid of kids.flat()) if (kid != null) e.append(kid.nodeType ? kid : document.createTextNode(kid));
+    return e;
+  }
+
+  function render() {
+    root.innerHTML = '';
+    if (!S.signedIn) return root.append(t1());
+    root.append(
+      h('div', { class: 'pl-topbar' }, h('div', { class: 'pl-topbar__title' }, 'Patient Listener — console'), h('span', { class: 'pl-muted' }, DATA.therapist.name)),
+      tabs(),
+      ({ T2: t2, T3: t3, T4: t4, T5: t5, T6: t6 }[S.tab])(),
+    );
+  }
+
+  function tabs() {
+    const items = [['T2', 'Caseload'], ['T3', 'Word list'], ['T4', 'Progress'], ['T5', 'Profile & hints'], ['T6', 'Consent & export']];
+    const row = h('div', { class: 'pl-tabs', role: 'tablist' });
+    items.forEach(([id, label]) => row.append(h('button', { class: 'pl-tab', role: 'tab', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, label)));
+    return row;
+  }
+
+  // T1 sign-in
+  function t1() {
+    const wrap = h('div', { class: 'pl-screen pl-screen--center' },
+      h('h1', { class: 'pl-prompt' }, 'Sign in'),
+      h('p', { class: 'pl-muted' }, DATA.therapist.mfa ? 'Use your passkey, then the code from your authenticator.' : 'Demo login for judges — no passkey needed.'),
+      h('button', { class: 'pl-btn pl-btn--primary', style: 'max-width:360px', 'data-autofocus': '', onclick: () => { S.signedIn = true; render(); } }, DATA.therapist.mfa ? 'Sign in with passkey' : 'Enter demo console'),
+    );
+    setTimeout(() => { const b = wrap.querySelector('button'); if (b) b.focus(); }, 0);
+    return wrap;
+  }
+
+  // T2 caseload
+  function t2() {
+    const wrap = h('div', {});
+    wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Caseload'));
+    DATA.caseload.forEach(p => wrap.append(h('div', { class: 'pl-card', style: 'margin-bottom:12px' },
+      h('div', { class: 'pl-setting__row' },
+        h('span', {}, h('b', {}, p.name), ' — ', p.needs.join(', ')),
+        h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { S.person = p.id; S.tab = 'T3'; render(); } }, 'Open')),
+      h('p', { class: 'pl-muted' }, `Last session: ${p.last}. Words returned this week: ${p.returned}.`))));
+    return wrap;
+  }
+
+  // T3 word list
+  function t3() {
+    const words = DATA.words[S.person] || [];
+    const wrap = h('div', {});
+    wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Word list — ' + name(S.person)));
+    words.forEach(w => {
+      const row = h('div', { class: 'pl-card', style: 'margin-bottom:12px' },
+        h('div', { class: 'pl-setting__row' },
+          h('span', {}, h('b', {}, w.text), ' · ', w.kind, ' · starts with ', w.first),
+          w.status === 'draft'
+            ? h('span', { class: 'pl-pill' },
+                h('span', { class: 'pl-locked', style: 'margin-right:8px;align-self:center' }, `draft from ${w.by}`),
+                h('button', { onclick: () => approveWord(w) }, '✓ Approve'))
+            : h('span', { class: 'pl-cell pl-cell--check' }, '✓ live')),
+        h('label', { class: 'pl-muted', style: 'display:block;margin-top:8px' }, 'Meaning cue (never shown to the person as the word):'),
+        h('input', { value: w.cue, 'aria-label': `Meaning cue for ${w.text}`, oninput: (e) => { w.cue = e.target.value; }, style: 'width:100%;min-height:44px;font-size:18px;padding:0 12px;border:2px solid var(--pl-line);border-radius:10px;background:var(--pl-surface);color:var(--pl-text)' }),
+      );
+      wrap.append(row);
+    });
+    wrap.append(h('div', { class: 'pl-card' },
+      h('div', { class: 'pl-hint__level' }, 'Add one of “my phrases” (up to 60 characters)'),
+      h('div', { class: 'pl-type' },
+        h('input', { id: 'phrase', 'aria-label': 'New phrase', maxlength: '60', placeholder: 'Can you open the window?', style: 'min-height:44px' }),
+        h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { const v = document.getElementById('phrase').value.trim(); if (v) { words.push({ id: 'p-' + Date.now(), text: v, kind: 'phrase', cue: '', first: v[0].toUpperCase(), status: 'approved', by: 'slt' }); render(); } } }, 'Add')),
+    ));
+    return wrap;
+  }
+
+  // T4 progress grid
+  function t4() {
+    const g = DATA.grid[S.person] || { days: [], rows: [] };
+    const wrap = h('div', {});
+    wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Progress — ' + name(S.person)), h('p', { class: 'pl-muted' }, 'What happened, not a prediction. ✓ no hint · M meaning · S sound · W word · – not tried.'));
+    const table = h('table', { class: 'pl-grid' });
+    const head = h('tr', {}, h('th', {}, 'Word')); g.days.forEach(d => head.append(h('th', {}, d)));
+    table.append(h('thead', {}, head));
+    const body = h('tbody', {});
+    g.rows.forEach(r => { const tr = h('tr', {}, h('th', { scope: 'row' }, r.word)); r.cells.forEach((c, i) => { const [sym, cls, label] = CELL[c]; tr.append(h('td', { class: 'pl-cell ' + cls, 'aria-label': `${r.word}, ${g.days[i]}: ${label}` }, sym)); }); body.append(tr); });
+    table.append(body);
+    wrap.append(h('div', { class: 'pl-grid-wrap' }, table));
+    return wrap;
+  }
+
+  // T5 profile & hint settings
+  function t5() {
+    const s = DATA.settings[S.person] || { needs: [], hintOrder: 'meaning-first', hintWait: 7, sessionMin: 20 };
+    const pill = (label, active, fn) => h('button', { 'aria-pressed': String(active), onclick: fn }, label);
+    const wrap = h('div', {});
+    wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Profile & hints — ' + name(S.person)));
+    wrap.append(
+      h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, 'Hint order'),
+        h('span', { class: 'pl-pill' }, pill('Meaning first', s.hintOrder === 'meaning-first', () => { s.hintOrder = 'meaning-first'; render(); }), pill('Sound first', s.hintOrder === 'sound-first', () => { s.hintOrder = 'sound-first'; render(); })))),
+      h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, 'Offer a hint after'),
+        h('span', { class: 'pl-pill' }, [4, 7, 10, 15].map(n => pill(n + 's', s.hintWait === n, () => { s.hintWait = n; render(); })), pill('Never', s.hintWait === null, () => { s.hintWait = null; render(); })))),
+      h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, 'Session length'),
+        h('span', { class: 'pl-pill' }, [10, 20].map(n => pill(n + ' min', s.sessionMin === n, () => { s.sessionMin = n; render(); })), pill('No limit', s.sessionMin === null, () => { s.sessionMin = null; render(); })))),
+      h('p', { class: 'pl-muted' }, 'Every wait is kept inside the safe range. The person can always make a wait longer or switch it off themselves.'),
+    );
+    return wrap;
+  }
+
+  // T6 consent & export
+  function t6() {
+    const c = DATA.consent[S.person] || { tellCarerLowMood: false, dataSharing: false };
+    const toggle = (label, key) => h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, label),
+      h('button', { class: 'pl-btn pl-btn--secondary', 'aria-pressed': String(c[key]), onclick: () => { c[key] = !c[key]; render(); } }, c[key] ? 'On' : 'Off')));
+    const wrap = h('div', {});
+    wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Consent & export — ' + name(S.person)),
+      toggle('Tell the carer if low mood is detected', 'tellCarerLowMood'),
+      toggle('Keep practice data to show progress', 'dataSharing'),
+      h('div', { class: 'pl-btn-row', style: 'margin-top:16px' },
+        h('button', { class: 'pl-btn pl-btn--secondary', onclick: exportCsv }, '⬇ Export CSV'),
+        h('button', { class: 'pl-btn pl-btn--secondary', style: 'border-color:var(--pl-danger);color:var(--pl-danger)', onclick: deleteAll }, '🗑 Delete everything')),
+      h('p', { class: 'pl-muted' }, 'Export includes “my phrases” as plain text. Delete removes all words, photos and attempts within 24 hours.'));
+    return wrap;
+  }
+
+  function exportCsv() {
+    const words = DATA.words[S.person] || [];
+    let csv = 'type,word_or_phrase,kind\n';
+    words.forEach(w => { csv += `word,${JSON.stringify(w.text)},${w.kind}\n`; });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${S.person}.csv`; a.click();
+  }
+  function deleteAll() {
+    // Second confirmation screen (DS-T07).
+    const ok = window.confirm('Delete everything for ' + name(S.person) + '? This cannot be undone.');
+    if (ok) { DATA.words[S.person] = []; alert('Deletion requested. Completes within 24 hours.'); render(); }
+  }
+
+  function name(id) { const p = DATA.caseload.find(x => x.id === id); return p ? p.name : id; }
+
+  /* Live data from the app server's console API (GET /api/console/...). When opened from disk
+   * (file://) or with ?mock=1, the mock DATA above is used instead, so the console still works
+   * offline. */
+  const API = (location.protocol.startsWith('http') && new URLSearchParams(location.search).get('mock') !== '1') ? '' : null;
+
+  async function approveWord(w) {
+    if (API != null) {
+      try {
+        const r = await fetch(`${API}/api/console/words/${S.person}/${w.id}/approve`, { method: 'POST' });
+        if (r.ok) { w.status = 'approved'; render(); return; }
+      } catch (e) { /* fall through to local update */ }
+    }
+    w.status = 'approved'; render();
+  }
+
+  async function hydrate() {
+    if (API == null) return;  // file:// or ?mock=1 -> keep the mock DATA
+    try {
+      const cl = await (await fetch(`${API}/api/console/caseload`)).json();
+      DATA.therapist.name = cl.therapist.name;
+      DATA.caseload = cl.caseload;
+      await Promise.all(cl.caseload.map(async (p) => {
+        const [w, g, s, c] = await Promise.all([
+          fetch(`${API}/api/console/words/${p.id}`).then(r => r.json()),
+          fetch(`${API}/api/console/grid/${p.id}`).then(r => r.json()),
+          fetch(`${API}/api/console/settings/${p.id}`).then(r => r.json()),
+          fetch(`${API}/api/console/consent/${p.id}`).then(r => r.json()),
+        ]);
+        DATA.words[p.id] = w.words;
+        DATA.grid[p.id] = { days: g.days, rows: g.rows };
+        DATA.settings[p.id] = { needs: s.needs, hintOrder: s.hintOrder, hintWait: s.hintWait, sessionMin: s.sessionMin };
+        DATA.consent[p.id] = { tellCarerLowMood: c.tellCarerLowMood, dataSharing: c.dataSharing };
+      }));
+      render();
+    } catch (e) { /* server down -> keep whatever mock DATA we have */ }
+  }
+
+  const order = { system: 'light', light: 'dark', dark: 'system' };
+  document.getElementById('theme').addEventListener('click', () => { const cur = document.documentElement.getAttribute('data-theme') || 'system'; const n = order[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n); });
+
+  render();
+  hydrate();
+  </script>
+</body>
+</html>

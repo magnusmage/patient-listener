@@ -1,0 +1,30 @@
+Patient Listener
+Copyright (c) 2026
+Licensed under the MIT License (see LICENSE).
+
+This product is designed to use the following third-party models and tools on the deploy box.
+Each is used under its own license; see the model cards and repositories for the exact terms.
+
+NVIDIA open models (NVIDIA Open Model License / CC-BY-4.0 / OpenMDW-1.1 as noted on each card):
+  - nvidia/nemotron-speech-streaming-en-0.6b   (streaming ASR)
+  - nvidia/magpie_tts_multilingual_357m         (TTS)
+  - nvidia/Nemotron-3_5-Lightning               (live replies, via Nebius Token Factory)
+  - nvidia/nemotron-3-super-120b-a12b           (nightly hints/plan/card, via Token Factory)
+  - nvidia/parakeet_realtime_eou_120m-v1        (end-of-utterance signal; controller input only)
+  - nvidia/NVIDIA-NemotronLabs-VoiceChat-11B    (recorded baseline in the video only; license
+                                                 OpenMDW-1.1 on Hugging Face)
+
+Frameworks and libraries (Apache-2.0 / BSD / MIT / ISC as noted in pyproject.toml):
+  - pipecat-ai, silero-vad, nemo_toolkit, torch
+  - openai (client to Token Factory), tenacity, instructor
+  - rapidfuzz, jellyfish, nltk (CMUdict), epitran, fsrs
+  - fastapi, uvicorn, pydantic, pydantic-settings
+  - sqlalchemy, asyncpg, aiosqlite, alembic, saq
+  - numpy, soundfile, librosa, pyloudnorm, soxr, audiotsm
+  - structlog, opentelemetry-sdk, arize-phoenix
+  - NVIDIA NemoClaw, NVIDIA OpenShell, Nous Research Hermes Agent (carer channel)
+
+No AphasiaBank audio or any real patient data is included in this repository. Demo speech is
+synthetic or recorded by consenting volunteers reading a script.
+
+Read each license file before distributing.

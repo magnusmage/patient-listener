@@ -1,0 +1,104 @@
+/* Patient Listener — design tokens (workbook: Design system -> Tokens).
+   The ONLY place raw colour values appear. Every text pair is >= 7:1 (AAA), edges >= 3:1.
+   Colour never carries meaning alone (DS-A05). Profiles change behaviour, never colours. */
+
+@font-face {
+  /* Self-hosted Atkinson Hyperlegible Next (OFL). Drop the files in web/fonts/ on deploy;
+     the fallback stack keeps the app legible and correctly sized until then. */
+  font-family: "Atkinson Hyperlegible Next";
+  src: local("Atkinson Hyperlegible Next"), local("Atkinson Hyperlegible");
+  font-display: swap;
+}
+
+:root {
+  /* --- Colour: light (default) --- */
+  --pl-page: #F4F7F6;
+  --pl-surface: #FFFFFF;
+  --pl-text: #11201E;
+  --pl-muted: #3F524E;          /* secondary labels only, never a prompt */
+  --pl-primary: #0B5F58;
+  --pl-on-primary: #FFFFFF;
+  --pl-good: #145A2F;
+  --pl-good-bg: #E3F2E8;
+  --pl-warn: #6A3F00;
+  --pl-warn-bg: #FBEFD9;
+  --pl-danger: #8A1A1F;         /* safety card only, never a wrong word */
+  --pl-danger-bg: #F8E1E1;
+  --pl-line: #6B7F7B;
+  --pl-caption-bg: #E8EFEE;
+
+  /* --- Type: one family (Atkinson Hyperlegible Next, OFL) --- */
+  --pl-font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui,
+             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --pl-text-prompt-size: 36px;  --pl-text-prompt-lh: 1.25;  --pl-text-prompt-wt: 700;
+  --pl-text-hint-size: 40px;    --pl-text-hint-lh: 1.2;     --pl-text-hint-wt: 700;
+  --pl-text-caption-size: 28px; --pl-text-caption-lh: 1.3;  --pl-text-caption-wt: 400;
+  --pl-text-body-size: 24px;    --pl-text-body-lh: 1.4;     --pl-text-body-wt: 400;
+  --pl-text-button-size: 26px;  --pl-text-button-lh: 1.2;   --pl-text-button-wt: 700;
+  --pl-text-console-size: 18px; --pl-text-console-lh: 1.5;  --pl-text-console-wt: 400;
+
+  /* --- Space (8px grid) --- */
+  --pl-space-1: 8px;
+  --pl-space-2: 16px;
+  --pl-space-3: 24px;
+  --pl-space-4: 32px;
+  --pl-space-5: 48px;
+  --pl-space-6: 64px;
+
+  /* --- Shape --- */
+  --pl-target: 64px;            /* patient app min touch target */
+  --pl-target-console: 44px;    /* console min target */
+  --pl-gap-target: 16px;        /* min gap between targets */
+  --pl-radius-card: 16px;
+  --pl-radius-button: 999px;
+  --pl-button-height: 72px;
+  --pl-content-max: 720px;
+
+  /* --- Motion & focus --- */
+  --pl-motion: 0ms;             /* no motion by default (DS-A07) */
+  --pl-focus-width: 4px;
+  --pl-focus-offset: 3px;
+}
+
+/* Motion is opt-in only when the person has not asked to reduce it. */
+@media (prefers-reduced-motion: no-preference) {
+  :root { --pl-motion: 200ms; }
+}
+
+/* --- Colour: dark (system preference), unless the person forced light --- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pl-page: #0F1716;
+    --pl-surface: #16211F;
+    --pl-text: #E6EEEC;
+    --pl-muted: #B3C4C0;
+    --pl-primary: #6FD0C4;
+    --pl-on-primary: #0B1312;
+    --pl-good: #9FE3B5;
+    --pl-good-bg: #123322;
+    --pl-warn: #F2CE8A;
+    --pl-warn-bg: #3A2A05;
+    --pl-danger: #F3B0B2;
+    --pl-danger-bg: #3A1012;
+    --pl-line: #4A5C58;
+    --pl-caption-bg: #12201D;
+  }
+}
+
+/* --- Colour: dark, forced by the theme toggle --- */
+:root[data-theme="dark"] {
+  --pl-page: #0F1716;
+  --pl-surface: #16211F;
+  --pl-text: #E6EEEC;
+  --pl-muted: #B3C4C0;
+  --pl-primary: #6FD0C4;
+  --pl-on-primary: #0B1312;
+  --pl-good: #9FE3B5;
+  --pl-good-bg: #123322;
+  --pl-warn: #F2CE8A;
+  --pl-warn-bg: #3A2A05;
+  --pl-danger: #F3B0B2;
+  --pl-danger-bg: #3A1012;
+  --pl-line: #4A5C58;
+  --pl-caption-bg: #12201D;
+}

@@ -1,0 +1,79 @@
+[project]
+name = "patient-listener"
+version = "0.1.0"
+description = "A voice practice partner for adults whose speech takes time. Pure, testable core."
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+readme = "README.md"
+# The decision core (controller, matcher, validator, safety, hints, FSRS mapping, merge, store,
+# session engine) depends ONLY on the standard library, so it installs and tests with no extras.
+# numpy is optional (loudness RMS has a stdlib fallback).
+dependencies = []
+
+[project.optional-dependencies]
+# Real adapters for the GPU / deploy box (ports and adapters). Not needed for the core or tests.
+voice = [
+  "pipecat-ai[nvidia,silero,websocket]~=1.12",
+  "nemo_toolkit[asr,tts]~=3.0",
+  "silero-vad~=6.2",
+  "cuda-bindings>=13.0.0",     # NeMo #15480
+  "torch>=2.6",                # CVE-2025-32434
+  "numpy~=2.5", "soundfile~=0.14", "librosa~=1.0", "pyloudnorm~=0.2", "soxr~=1.1",
+  "audiotsm==0.1.2",
+]
+llm = ["openai[aiohttp]~=3.24", "tenacity~=9.1", "instructor~=1.17"]
+matching = ["rapidfuzz~=3.14", "jellyfish~=1.2", "nltk~=3.10", "epitran~=1.35"]
+schedule = ["fsrs~=6.3"]
+api = ["fastapi~=0.142", "uvicorn[standard]~=0.54", "pydantic~=2.13", "pydantic-settings~=2.15"]
+store = ["sqlalchemy[asyncio]~=2.1", "asyncpg~=0.31", "aiosqlite~=0.22", "alembic~=1.20"]
+jobs = ["saq~=0.26"]
+trace = ["structlog~=26.1", "arize-phoenix-otel~=0.17", "opentelemetry-sdk~=1.45",
+         "openinference-instrumentation-openai~=0.1.63"]
+all = [
+  "patient-listener[voice,llm,matching,schedule,api,store,jobs,trace]",
+]
+
+[dependency-groups]
+dev = ["pytest~=9.1", "pytest-asyncio~=1.4", "respx~=0.23", "hypothesis~=6.168",
+       "syrupy~=6.1", "inspect-ai~=0.3", "ruff~=0.16", "mypy~=2.4",
+       "import-linter~=2.15", "pre-commit~=4.6"]
+
+[project.scripts]
+# The app API server (serves web/, issues session tokens, runs the core over a WebSocket).
+patient-listener-server = "patient_listener.app.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
+markers = ["gpu: needs a CUDA GPU", "live: calls Token Factory"]
+addopts = "-m 'not gpu and not live'"
+
+[tool.mypy]
+# Strict on the pure core; basic elsewhere (D-16).
+python_version = "3.12"
+packages = ["patient_listener"]
+strict = false
+
+[[tool.mypy.overrides]]
+module = [
+  "patient_listener.voice.controller",
+  "patient_listener.voice.matcher",
+  "patient_listener.voice.merge",
+  "patient_listener.llm.validate",
+  "patient_listener.voice.safety",
+  "patient_listener.schedule.fsrs",
+]
+disallow_untyped_defs = true
+warn_return_any = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
