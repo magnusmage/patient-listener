@@ -121,6 +121,10 @@ The browser sends the session token and device identifier in the WebSocket URL. 
 GET /?token=REDACTED&device=REDACTED HTTP/1.1
 ```
 
+**Follow-up correction:** `a93e87c fix: redact credentials for direct uvicorn startup` moved the
+filter installation into the FastAPI application factory. This covers both supported server
+startup paths: `patient-listener-server` and direct `uvicorn ...:create_app --factory`.
+
 ## Current architecture
 
 ```text
@@ -222,6 +226,7 @@ b303494 fix: stop practice after safety alert
 7ae13a6 fix: restrict console access by authenticated role
 7f8e570 fix: bind patient sessions to one device
 3ccc917 fix: protect session credentials in transport and logs
+a93e87c fix: redact credentials for direct uvicorn startup
 ```
 
 The repository is currently clean after these commits. Future work should use one issue and one focused commit at a time, with relevant tests added before committing.
