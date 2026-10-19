@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import Settings, settings as default_settings
 
-from .access_log import install_access_log_redaction
+from .access_log import install_access_log_redaction, redact_request_target
 from .console_api import router as console_router
 from .deps import build_state
 from .session import AppSession
@@ -45,6 +45,21 @@ def _is_secure(headers, scheme: str, *, trust_proxy_headers: bool) -> bool:
         return False
     forwarded = headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
     return forwarded in {"https", "wss"}
+
+
+def _redact_websocket_scope(scope: dict) -> None:
+    """Remove credentials from the ASGI scope before Uvicorn writes its accept log.
+
+    FastAPI has already copied query values into endpoint arguments when this runs. Mutating the
+    scope therefore cannot affect authentication, while it provides a second safeguard for
+    Uvicorn configurations that do not retain logger filters.
+    """
+    query = scope.get("query_string", b"")
+    if isinstance(query, bytes):
+        text = query.decode("utf-8", errors="replace")
+    else:
+        text = str(query)
+    scope["query_string"] = redact_request_target(f"?{text}")[1:].encode("utf-8")
 
 
 @asynccontextmanager
@@ -108,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket, token: str = Query(""), device: str = Query("")) -> None:
+        _redact_websocket_scope(websocket.scope)
         state = websocket.app.state.pl
         if state.settings.require_https and not _is_secure(
             websocket.headers, websocket.url.scheme, trust_proxy_headers=state.settings.trust_proxy_headers

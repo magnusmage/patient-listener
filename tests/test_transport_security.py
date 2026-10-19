@@ -33,6 +33,16 @@ class AccessLogTests(unittest.TestCase):
         self.assertNotIn("browser-device", redacted)
         self.assertIn("other=kept", redacted)
 
+    def test_websocket_scope_is_redacted_before_acceptance_logging(self):
+        from patient_listener.app.server import _redact_websocket_scope
+
+        scope = {"query_string": b"token=secret-token&device=browser-device&other=kept"}
+        _redact_websocket_scope(scope)
+        text = scope["query_string"].decode("utf-8")
+        self.assertNotIn("secret-token", text)
+        self.assertNotIn("browser-device", text)
+        self.assertIn("other=kept", text)
+
     def test_uvicorn_filter_changes_the_request_target_before_formatting(self):
         record = logging.LogRecord(
             "uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',

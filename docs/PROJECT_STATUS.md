@@ -125,6 +125,10 @@ GET /?token=REDACTED&device=REDACTED HTTP/1.1
 filter installation into the FastAPI application factory. This covers both supported server
 startup paths: `patient-listener-server` and direct `uvicorn ...:create_app --factory`.
 
+**Defence in depth:** the WebSocket handler also removes credential values from its ASGI scope
+after FastAPI has read them and before it accepts the connection. This protects the accept log
+even if a Uvicorn logging configuration does not preserve the logger filter.
+
 ## Current architecture
 
 ```text
