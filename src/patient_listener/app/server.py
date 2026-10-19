@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import Settings, settings as default_settings
 
+from .access_log import install_access_log_redaction
 from .console_api import router as console_router
 from .deps import build_state
 from .session import AppSession
@@ -59,6 +60,9 @@ async def _lifespan(app: FastAPI):
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    # Uvicorn can start this factory directly, bypassing the package entry point. Install
+    # redaction here so neither startup path writes session credentials to access logs.
+    install_access_log_redaction()
     app = FastAPI(title="Patient Listener", lifespan=_lifespan)
     app.state.settings = settings or default_settings
     app.state.settings.assert_safe_startup()

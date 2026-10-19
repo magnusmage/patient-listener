@@ -19,6 +19,13 @@ except Exception:  # pragma: no cover - optional API dependency
 
 
 class AccessLogTests(unittest.TestCase):
+    def test_application_factory_installs_access_log_redaction(self):
+        from patient_listener.app.server import create_app
+
+        create_app(Settings())
+        filters = logging.getLogger("uvicorn.access").filters
+        self.assertTrue(any(isinstance(item, AccessLogRedactionFilter) for item in filters))
+
     def test_redacts_token_and_device_values(self):
         target = "/ws?token=secret-token&device=browser-device&other=kept"
         redacted = redact_request_target(target)
