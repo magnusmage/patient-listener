@@ -36,6 +36,16 @@ def _web_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "web"
 
 
+def _is_secure(headers, scheme: str, *, trust_proxy_headers: bool) -> bool:
+    """Accept direct TLS, or the header from a configured trusted proxy."""
+    if scheme.lower() in {"https", "wss"}:
+        return True
+    if not trust_proxy_headers:
+        return False
+    forwarded = headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return forwarded in {"https", "wss"}
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     app.state.pl = build_state(db_path=os.environ.get("PL_DB_PATH", ":memory:"),
@@ -51,6 +61,7 @@ async def _lifespan(app: FastAPI):
 def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Patient Listener", lifespan=_lifespan)
     app.state.settings = settings or default_settings
+    app.state.settings.assert_safe_startup()
     app.include_router(console_router)
 
     @app.middleware("http")
@@ -65,6 +76,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, person: str = Query("margaret"), device: str = Query("")
     ) -> JSONResponse:
         state = request.app.state.pl
+        if state.settings.require_https and not _is_secure(
+            request.headers, request.url.scheme, trust_proxy_headers=state.settings.trust_proxy_headers
+        ):
+            return JSONResponse({"error": "HTTPS is required"}, status_code=400)
         pid = state.people.get(person, person)
         if pid not in state.people.values():
             return JSONResponse({"error": f"unknown person: {person}"}, status_code=404)
@@ -90,6 +105,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.websocket("/ws")
     async def ws(websocket: WebSocket, token: str = Query(""), device: str = Query("")) -> None:
         state = websocket.app.state.pl
+        if state.settings.require_https and not _is_secure(
+            websocket.headers, websocket.url.scheme, trust_proxy_headers=state.settings.trust_proxy_headers
+        ):
+            await websocket.close(code=1008)
+            return
         try:
             claims = state.signer.verify(token, device)
         except ValueError:

@@ -50,6 +50,9 @@ class Settings:
     # secret, fine for dev; set a stable value on the deploy box). The ONLY place it is read.
     session_token_secret: str = os.environ.get("SESSION_TOKEN_SECRET", "")
     session_token_ttl_s: int = int(os.environ.get("SESSION_TOKEN_TTL_S", "900"))
+    environment: str = os.environ.get("PL_ENV", "development").strip().lower()
+    require_https: bool = _b("REQUIRE_HTTPS", os.environ.get("PL_ENV", "").lower() == "production")
+    trust_proxy_headers: bool = _b("TRUST_PROXY_HEADERS", False)
     console_demo_enabled: bool = _b("CONSOLE_DEMO_ENABLED", False)
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")  # sandbox only
     phoenix_collector_endpoint: str = os.environ.get(
@@ -73,6 +76,13 @@ class Settings:
             raise ValueError("TELEGRAM_GROUP_POLICY must be 'disabled' (NemoClaw #12409)")
         if tuple(int(x) for x in self.openshell_min_version.split(".")) < (0, 0, 34):
             raise ValueError("OPENSHELL_MIN_VERSION must be >= 0.0.34 (CVE-2026-65093)")
+        if self.environment == "production":
+            if not self.session_token_secret:
+                raise ValueError("SESSION_TOKEN_SECRET is required in production")
+            if self.session_token_ttl_s != 900:
+                raise ValueError("SESSION_TOKEN_TTL_S must be 900 seconds in production")
+            if not self.require_https:
+                raise ValueError("REQUIRE_HTTPS must be enabled in production")
 
 
 settings = Settings()
