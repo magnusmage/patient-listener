@@ -157,7 +157,7 @@ The model choices and adapter boundaries already exist, but the live models are 
 
 | Capability | Planned model/service | Current state |
 | --- | --- | --- |
-| Streaming speech recognition | NeMo / `nvidia/nemotron-speech-streaming-en-0.6b` | Configured and scaffolded; binary audio frames are currently ignored. |
+| Streaming speech recognition | NeMo / `nvidia/nemotron-speech-streaming-en-0.6b` | Audio boundary is implemented and tested with a fake adapter; the real NeMo adapter remains to be added on the GPU deployment. |
 | Text-to-speech | Magpie / `nvidia/magpie_tts_multilingual_357m` | Configured and scaffolded; no live synthesis in the demo. |
 | Short live replies and completeness checks | Nebius Token Factory with Nemotron Lightning | `TokenFactoryLlm` adapter exists; the running demo uses safe templates. |
 | Therapist-approved plan generation | Nebius Token Factory with Nemotron Super | Adapter interface exists; live deployment work remains. |
@@ -170,12 +170,12 @@ The model choices and adapter boundaries already exist, but the live models are 
 
 This is the next backend/AI issue.
 
-- Receive 16 kHz mono PCM WebSocket frames.
-- Add a streaming-ASR adapter behind the existing `Asr` port.
-- Apply patient-approved word and phrase boosts to ASR.
-- Send speech, partial, final, and silence events to the existing `AppSession`/`SessionEngine` flow.
-- Add Magpie TTS behind the `Tts` port and maintain half-duplex turn taking.
-- Test first with fake ASR/TTS adapters; then validate on an approved Linux GPU deployment environment.
+- Receive 16 kHz mono PCM WebSocket frames. **Completed at the backend boundary.**
+- Apply patient-approved word and phrase boosts to the streaming-ASR adapter contract. **Completed and tested with a fake adapter.**
+- Send speech, partial, final, and silence events to the existing `AppSession`/`SessionEngine` flow. **Completed.**
+- Add the real NeMo streaming-ASR adapter behind this contract.
+- Add the real Magpie TTS adapter and browser audio playback while maintaining half-duplex turn taking.
+- Validate the real models on an approved Linux GPU deployment environment.
 - Do not persist raw audio or transcripts.
 
 ### 6. Enable Token Factory safely

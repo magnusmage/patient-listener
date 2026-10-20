@@ -1,47 +1,43 @@
-"""Audio transport scaffold (the GPU / deploy box path).
+"""Streaming-audio boundary for the GPU deployment path.
 
-The patient app's ``LiveDriver`` streams 16 kHz mono PCM frames over the same WebSocket. On the
-deploy box those frames are transcribed by a NeMo streaming ASR adapter and the controller's
-spoken lines are rendered by a Magpie TTS adapter - both behind the existing ``Asr`` / ``Tts``
-ports (``ports.py``), so the core never changes.
-
-This module is **import-guarded and inert offline**: with no ``voice`` extra, no GPU and no
-model weights, :func:`build_pipeline` returns ``None`` and the server simply ignores binary
-frames (the text/logic transport drives everything in the sandbox). The structure below is the
-real wiring the deploy box fills in; it is intentionally not exercised by the offline tests.
-
-Wiring (deploy box):
-
-    asr = NeMoStreamingAsr(settings)                 # implements ports.Asr
-    tts = MagpieTts(settings)                         # implements ports.Tts
-    pipeline = AudioPipeline(asr, tts, on_words=..., on_silence=...)
-    # feed inbound binary frames:        await pipeline.on_frame(frame)
-    # turn a Speak/Play action into audio: async for chunk in pipeline.say(text): ws.send(chunk)
-
-The ``on_words`` / ``on_silence`` callbacks feed the orchestrator exactly the ``("heard", ...)``
-and ``("silence", ...)`` events the text transport already produces, so both transports converge
-on one :class:`~patient_listener.app.session.AppSession`.
+The browser sends 16 kHz mono PCM frames as WebSocket binary messages. This module converts
+model-specific ASR output into small, transport-neutral events and sends final text to the
+existing session controller. It never stores audio or transcripts.
 """
 
 from __future__ import annotations
 
-from typing import Awaitable, Callable, Optional, Protocol
+from dataclasses import dataclass
+from typing import Awaitable, Callable, Iterable, Optional, Protocol
 
 from ..config import Settings
 
-__all__ = ["AudioPipeline", "build_pipeline", "audio_available"]
+__all__ = ["AsrEvent", "AudioPipeline", "audio_available", "build_pipeline"]
+
+_MAX_PCM_FRAME_BYTES = 32_768
+_MAX_TRANSCRIPT_CHARS = 500
 
 
-class _AsrLike(Protocol):
-    async def stream(self, frames): ...  # noqa: ANN001 - see ports.Asr
+@dataclass(frozen=True)
+class AsrEvent:
+    """One normalized result from streaming ASR; text is transient session data."""
+
+    kind: str  # speech | partial | final | silence
+    text: str = ""
+
+
+class _StreamingAsr(Protocol):
+    async def feed(
+        self, frame: bytes, *, phrase_boosts: tuple[str, ...], boost_alpha: float
+    ) -> Iterable[AsrEvent]: ...
 
 
 class _TtsLike(Protocol):
-    async def speak(self, text: str, voice: str): ...
+    async def speak(self, text: str, voice: str) -> Iterable[bytes]: ...
 
 
 def audio_available(settings: Settings) -> bool:
-    """True only when the real ASR/TTS adapters can be constructed (``voice`` extra + weights)."""
+    """True only when the optional NeMo runtime is present and models are configured."""
     try:
         import nemo_toolkit  # type: ignore  # noqa: F401
     except Exception:
@@ -50,44 +46,70 @@ def audio_available(settings: Settings) -> bool:
 
 
 class AudioPipeline:
-    """Bridges binary PCM frames to the orchestrator and renders spoken lines to audio.
-
-    Constructed only on the deploy box. ``on_words``/``on_silence`` are the orchestrator hooks;
-    ``send_audio`` streams TTS chunks back to the browser.
-    """
+    """Bridge PCM frames into the authenticated application's session callbacks."""
 
     def __init__(
         self,
-        asr: _AsrLike,
+        asr: _StreamingAsr,
         tts: _TtsLike,
-        on_words: Callable[[str], Awaitable[None]],
+        *,
+        on_speech: Callable[[], Awaitable[None]],
+        on_partial: Callable[[str], Awaitable[None]],
+        on_final: Callable[[str], Awaitable[None]],
         on_silence: Callable[[], Awaitable[None]],
         send_audio: Callable[[bytes], Awaitable[None]],
+        phrase_boosts: Iterable[str] = (),
+        boost_alpha: float = 2.0,
         voice: str = "Aria",
     ) -> None:
         self.asr = asr
         self.tts = tts
-        self.on_words = on_words
+        self.on_speech = on_speech
+        self.on_partial = on_partial
+        self.on_final = on_final
         self.on_silence = on_silence
         self.send_audio = send_audio
+        self.phrase_boosts = tuple(text for text in phrase_boosts if text.strip())
+        self.boost_alpha = boost_alpha
         self.voice = voice
 
-    async def on_frame(self, frame: bytes) -> None:  # pragma: no cover - deploy box only
-        """Push one inbound PCM frame through streaming ASR; emit words/silence to the session."""
-        raise NotImplementedError("wire NeMo streaming ASR on the deploy box")
+    async def on_frame(self, frame: bytes) -> None:
+        """Process one bounded PCM frame and dispatch only normalized ASR events."""
+        if not frame:
+            return
+        if len(frame) > _MAX_PCM_FRAME_BYTES:
+            raise ValueError("audio frame exceeds the 32 KiB limit")
+        events = await self.asr.feed(
+            frame, phrase_boosts=self.phrase_boosts, boost_alpha=self.boost_alpha
+        )
+        for event in events:
+            if event.kind == "speech":
+                await self.on_speech()
+            elif event.kind == "silence":
+                await self.on_silence()
+            elif event.kind in {"partial", "final"}:
+                text = event.text.strip()
+                if not text:
+                    continue
+                if len(text) > _MAX_TRANSCRIPT_CHARS:
+                    raise ValueError("ASR transcript exceeds the 500 character limit")
+                if event.kind == "partial":
+                    await self.on_partial(text)
+                else:
+                    await self.on_final(text)
+            else:
+                raise ValueError(f"unknown ASR event: {event.kind}")
 
-    async def say(self, text: str) -> None:  # pragma: no cover - deploy box only
-        """Render ``text`` with Magpie TTS and stream the chunks to the browser (half-duplex)."""
+    async def say(self, text: str) -> None:
+        """Render a listener line on the deploy box; the browser remains half-duplex."""
         async for chunk in await self.tts.speak(text, self.voice):
             await self.send_audio(chunk)
 
 
 def build_pipeline(settings: Settings, **hooks) -> Optional[AudioPipeline]:  # noqa: ANN003
-    """Construct the pipeline on the deploy box, or ``None`` offline (the usual sandbox case)."""
+    """Construct production adapters on the GPU deploy box, or return ``None`` locally."""
     if not audio_available(settings):
         return None
-    # Deploy box: import and construct the real adapters here, then return AudioPipeline(...).
-    # Kept lazy so importing this module never requires the voice extra.
-    raise NotImplementedError(  # pragma: no cover - deploy box only
-        "construct NeMo/Magpie adapters and return AudioPipeline(asr, tts, **hooks)"
-    )
+    # The next deployment-specific subtask supplies NeMoStreamingAsr and MagpieTts here.
+    # Keeping imports lazy protects the local backend demo from heavyweight voice dependencies.
+    raise NotImplementedError("construct NeMo/Magpie adapters for the GPU deployment")

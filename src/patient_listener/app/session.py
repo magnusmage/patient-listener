@@ -232,6 +232,30 @@ class AppSession:
             events = [{"type": "ended", "reason": "stop", "found": sorted(self.engine.found)}]
         await self._emit(events)
 
+    # --- microphone / ASR input ---------------------------------------------
+
+    async def on_audio_speech(self) -> None:
+        """Streaming ASR/VAD detected speech; this immediately stops the silence clock."""
+        if self.ended:
+            return
+        self._cancel_ticker()
+        await self._run_engine(("speech", self.now()))
+
+    async def on_audio_partial(self, text: str) -> None:
+        """Forward a transient caption. Partial ASR text never reaches storage or matching."""
+        if not self.ended and text:
+            await self._emit([{"type": "caption", "who": "you", "text": text, "partial": True}])
+
+    async def on_audio_final(self, text: str) -> None:
+        """A final ASR transcript follows the same safety and controller path as typed text."""
+        if not self.ended and text:
+            await self._heard("heard", text)
+
+    async def on_audio_silence(self) -> None:
+        """VAD found silence; resume the existing server-side patience clock."""
+        if not self.ended:
+            await self._pause()
+
     # --- heard / spoken input -------------------------------------------------
 
     async def _demo_say(self, variant: str) -> None:

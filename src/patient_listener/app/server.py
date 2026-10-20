@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from ..config import Settings, settings as default_settings
 
 from .access_log import install_access_log_redaction, redact_request_target
+from .audio import build_pipeline
 from .console_api import router as console_router
 from .deps import build_state
 from .session import AppSession
@@ -144,6 +145,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await websocket.send_json(event)
 
         app_session = AppSession(store=state.store, person_id=claims.person_id, send=send)
+        pipeline = build_pipeline(
+            state.settings,
+            on_speech=app_session.on_audio_speech,
+            on_partial=app_session.on_audio_partial,
+            on_final=app_session.on_audio_final,
+            on_silence=app_session.on_audio_silence,
+            send_audio=websocket.send_bytes,
+            phrase_boosts=(word.text for word in app_session.words),
+            boost_alpha=state.settings.boost_alpha,
+            voice=state.settings.tts_voice,
+        )
         try:
             while True:
                 message = await websocket.receive()
@@ -151,7 +163,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     break
                 if (text := message.get("text")) is not None:
                     await app_session.handle(json.loads(text))
-                # Binary frames are audio (deploy box only); ignored in the offline transport.
+                elif (frame := message.get("bytes")) is not None and pipeline is not None:
+                    await pipeline.on_frame(frame)
         except WebSocketDisconnect:
             pass
         finally:
