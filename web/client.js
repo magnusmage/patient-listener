@@ -168,23 +168,88 @@ class DemoEngine extends EventTarget {
 
 /* Live driver: WebSocket + mic + AudioWorklet. Used when window.PL_WS_URL is set. */
 class LiveDriver extends EventTarget {
-  constructor(url, token) { super(); this.url = url; this.token = token; this.device = patientDeviceId(); this.ws = null; this.ctx = null; this.node = null; this.stream = null; }
-  async start() {
-    this.ws = new WebSocket(`${this.url}?token=${encodeURIComponent(this.token || '')}&device=${encodeURIComponent(this.device)}`);
-    this.ws.binaryType = 'arraybuffer';
-    this.ws.onopen = () => this.ws.send(JSON.stringify({ type: 'start' }));
-    this.ws.onmessage = (e) => { if (typeof e.data === 'string') { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); } };
-    this.ws.onclose = () => this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    await this.ctx.audioWorklet.addModule('worklet.js');
-    const src = this.ctx.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.ctx, 'pl-downsample', { processorOptions: { targetRate: 16000 } });
-    this.node.port.onmessage = (ev) => { if (this.ws && this.ws.readyState === 1) this.ws.send(ev.data); };
-    src.connect(this.node);
+  constructor(url, token) {
+    super(); this.url = url; this.token = token; this.device = patientDeviceId();
+    this.person = 'margaret'; this.ws = null; this.ctx = null; this.node = null;
+    this.stream = null; this.source = null; this.stopped = false; this.muted = false;
+    this.audioId = null;
   }
-  _send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }
-  mute(v) { if (this.node) this.node.port.postMessage({ type: 'mute', value: v }); } // half-duplex
+  setProfile(need) { this.person = NEED_TO_PERSON[need] || 'margaret'; }
+  async start() {
+    this.stopped = false;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await this.ctx.resume();
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: true, noiseSuppression: true, channelCount: 1
+      } });
+      if (this.stopped) { this.stop(); return; }
+      await this.ctx.audioWorklet.addModule('worklet.js');
+      const src = this.ctx.createMediaStreamSource(this.stream);
+      this.node = new AudioWorkletNode(this.ctx, 'pl-downsample', {
+        processorOptions: { targetRate: 16000 }
+      });
+      this.node.port.onmessage = ev => {
+        if (!this.stopped && !this.muted && this.ws?.readyState === 1) {
+          if (this.ws.bufferedAmount > 32768) { this.stop(); return; }
+          this.ws.send(ev.data);
+        }
+      };
+      src.connect(this.node);
+      const silent = this.ctx.createGain(); silent.gain.value = 0;
+      this.node.connect(silent); silent.connect(this.ctx.destination);
+      if (!this.url || !this.token) {
+        const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}`, {
+          headers: { 'X-PL-Device': this.device }, cache: 'no-store'
+        });
+        if (!response.ok) throw new Error('Session request failed');
+        const session = await response.json();
+        if (!session.voice_enabled) throw new Error('GPU voice is not enabled on this server');
+        this.url = session.ws_url; this.token = session.token;
+      }
+      if (this.stopped) return;
+      await new Promise((resolve, reject) => {
+        const separator = this.url.includes('?') ? '&' : '?';
+        this.ws = new WebSocket(`${this.url}${separator}token=${encodeURIComponent(this.token)}&device=${encodeURIComponent(this.device)}&voice=true`);
+        this.ws.binaryType = 'arraybuffer';
+        this.ws.onopen = () => { this._send({ type: 'start' }); resolve(); };
+        this.ws.onerror = () => reject(new Error('Voice connection failed'));
+        this.ws.onmessage = e => this._message(e.data);
+        this.ws.onclose = () => {
+          reject(new Error('Voice connection closed'));
+          this.stop();
+          this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+        };
+      });
+    } catch (error) { this.stop(); throw error; }
+  }
+  _message(data) {
+    if (this.stopped) return;
+    if (typeof data !== 'string') {
+      if (this.audioId == null) { this.stop(); return; }
+      const pcm = new DataView(data);
+      const buffer = this.ctx.createBuffer(1, data.byteLength / 2, 22050);
+      const samples = buffer.getChannelData(0);
+      for (let i = 0; i < samples.length; i++) samples[i] = pcm.getInt16(i * 2, true) / 32768;
+      const source = this.ctx.createBufferSource();
+      const id = this.audioId;
+      source.buffer = buffer; source.connect(this.ctx.destination);
+      source.onended = () => {
+        if (this.stopped) return;
+        this.source = null;
+        this._send({ type: 'playback_done', id });
+      };
+      this.source = source; source.start();
+      return;
+    }
+    const message = JSON.parse(data);
+    if (message.type === 'audioStart') { this.audioId = message.id; this.mute(true); }
+    if (message.type === 'audioIdle') { this.audioId = null; this.mute(false); }
+    if (message.type === 'voiceError') { this.stop(); return; }
+    this.dispatchEvent(new CustomEvent(message.type, { detail: message }));
+  }
+  _send(obj) { if (!this.stopped && this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj)); }
+  mute(value) { this.muted = value; if (this.node) this.node.port.postMessage({ type: 'mute', value }); }
   help() { this._send({ type: 'help' }); }
   answer(yes) { this._send({ type: yes ? 'yes' : 'no' }); }
   confirmTap(ok) { this._send({ type: 'confirm_tap', ok }); }
@@ -192,9 +257,15 @@ class LiveDriver extends EventTarget {
   done() { this._send({ type: 'done' }); }
   rest() { this._send({ type: 'rest' }); }
   resume() { this._send({ type: 'resume' }); }
-  stop() { this._send({ type: 'stop' }); if (this.ws) this.ws.close(); if (this.stream) this.stream.getTracks().forEach(t => t.stop()); if (this.ctx) this.ctx.close(); }
-  // demo-only no-ops in live mode:
-  setProfile() {} beginPause() {} speech() {} sayWord() {} saySoundAlike() {} saySomethingElse() {} strokePhrase() {}
+  stop() {
+    this._send({ type: 'stop' }); this.stopped = true;
+    if (this.source) { this.source.onended = null; this.source.stop(); this.source = null; }
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    if (this.ws && this.ws.readyState < 2) this.ws.close();
+    if (this.ctx && this.ctx.state !== 'closed') this.ctx.close();
+    this.token = null;
+  }
+  beginPause() {} speech() {} sayWord() {} saySoundAlike() {} saySomethingElse() {} strokePhrase() {}
 }
 
 /* Server driver: the text/logic transport. Connects to the app server's WebSocket and drives
@@ -272,7 +343,7 @@ class ServerDriver extends EventTarget {
 function plMode() {
   const q = new URLSearchParams(location.search);
   if (q.get('demo') === '1') return 'demo';
-  if (window.PL_WS_URL) return 'audio';
+  if (window.PL_WS_URL || q.get('voice') === '1') return 'audio';
   if (q.get('server') === '1' || window.PL_API != null) return 'server';
   return 'demo';
 }

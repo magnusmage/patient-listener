@@ -11,6 +11,8 @@ Then open http://localhost:8000/ (patient app, server mode) and /console.html (t
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import json
 import os
 from contextlib import asynccontextmanager
@@ -23,11 +25,12 @@ from fastapi.staticfiles import StaticFiles
 from ..config import Settings, settings as default_settings
 
 from .access_log import install_access_log_redaction, redact_request_target
-from .audio import build_pipeline
+from .voice_connection import VoiceConnection
 from ..llm.factory import build_llm
 from .console_api import router as console_router
 from .deps import build_state
 from .session import AppSession
+from .voice_runtime import VoiceRuntime
 
 __all__ = ["create_app"]
 
@@ -66,11 +69,21 @@ def _redact_websocket_scope(scope: dict) -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    app.state.voice_runtime = None
     app.state.pl = build_state(db_path=os.environ.get("PL_DB_PATH", ":memory:"),
                                settings=app.state.settings)
     try:
+        if app.state.settings.voice_enabled:
+            # Load once per worker, not once per patient. This stage does not enable streaming.
+            app.state.voice_runtime = await asyncio.to_thread(
+                VoiceRuntime.load, app.state.settings
+            )
+            logging.getLogger(__name__).info("GPU voice models loaded; development streaming enabled")
         yield
     finally:
+        if app.state.voice_runtime is not None:
+            await asyncio.to_thread(app.state.voice_runtime.close)
+            app.state.voice_runtime = None
         app.state.pl.store.close()
         if app.state.pl.console_demo_store is not None:
             app.state.pl.console_demo_store.close()
@@ -91,6 +104,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.url.path.startswith("/api/console/") or request.url.path == "/api/session":
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.get("/healthz")
+    async def health(request: Request) -> JSONResponse:
+        runtime = request.app.state.voice_runtime
+        voice_enabled = request.app.state.settings.voice_enabled
+        # Do not advertise production voice readiness merely because weights loaded.
+        return JSONResponse({
+            "status": "voice_development" if voice_enabled else "text_ready",
+            "voice_enabled": voice_enabled,
+            "models_loaded": runtime is not None,
+            "streaming_ready": False,
+            "development_voice_enabled": runtime is not None,
+        }, status_code=503 if voice_enabled else 200,
+           headers={"Cache-Control": "no-store"})
 
     @app.get("/api/session")
     async def session_token(
@@ -120,11 +147,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "token": token,
                 "person": person,
                 "needs": needs,
+                "voice_enabled": request.app.state.voice_runtime is not None,
             }
         )
 
     @app.websocket("/ws")
-    async def ws(websocket: WebSocket, token: str = Query(""), device: str = Query("")) -> None:
+    async def ws(websocket: WebSocket, token: str = Query(""), device: str = Query(""),
+                 voice: bool = Query(False)) -> None:
         _redact_websocket_scope(websocket.scope)
         state = websocket.app.state.pl
         if state.settings.require_https and not _is_secure(
@@ -140,37 +169,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not await state.sessions.claim(claims.person_id):
             await websocket.close(code=1013, reason="Practice is already active on another device")
             return
-        await websocket.accept()
-
-        async def send(event: dict) -> None:
-            await websocket.send_json(event)
-
-        app_session = AppSession(store=state.store, person_id=claims.person_id, send=send,
-                                 llm=build_llm(state.settings))
-        pipeline = build_pipeline(
-            state.settings,
-            on_speech=app_session.on_audio_speech,
-            on_partial=app_session.on_audio_partial,
-            on_final=app_session.on_audio_final,
-            on_silence=app_session.on_audio_silence,
-            send_audio=websocket.send_bytes,
-            phrase_boosts=(word.text for word in app_session.words),
-            boost_alpha=state.settings.boost_alpha,
-            voice=state.settings.tts_voice,
-        )
+        runtime = websocket.app.state.voice_runtime
+        gpu_claimed = False
+        if voice:
+            if runtime is None or not await state.sessions.claim("__gpu_voice__"):
+                await state.sessions.release(claims.person_id)
+                await websocket.close(code=1013, reason="Voice is unavailable or busy")
+                return
+            gpu_claimed = True
+        app_session = connection = None
         try:
+            await websocket.accept()
+            async def direct_send(event: dict) -> None:
+                await websocket.send_json(event)
+
+            async def send(event: dict) -> None:
+                if connection is not None:
+                    await connection.send(event)
+                else:
+                    await direct_send(event)
+
+            app_session = AppSession(store=state.store, person_id=claims.person_id, send=send,
+                                     llm=build_llm(state.settings))
+            if voice:
+                connection = VoiceConnection(runtime, app_session, websocket, direct_send)
+                await connection.start()
             while True:
                 message = await websocket.receive()
                 if message.get("type") == "websocket.disconnect":
                     break
                 if (text := message.get("text")) is not None:
-                    await app_session.handle(json.loads(text))
-                elif (frame := message.get("bytes")) is not None and pipeline is not None:
-                    await pipeline.on_frame(frame)
+                    control = json.loads(text)
+                    if not isinstance(control, dict):
+                        raise ValueError("Expected control object")
+                    if control.get("type") == "playback_done" and connection is not None:
+                        connection.acknowledge(control.get("id"))
+                    else:
+                        await app_session.handle(control)
+                elif (frame := message.get("bytes")) is not None and connection is not None:
+                    await connection.frame(frame)
         except WebSocketDisconnect:
             pass
+        except (ValueError, asyncio.QueueFull):
+            await websocket.close(code=1008, reason="Invalid or excessive input")
         finally:
-            app_session.close()
+            if app_session is not None:
+                app_session.close()
+            if connection is not None:
+                await connection.close()
+            if gpu_claimed:
+                await state.sessions.release("__gpu_voice__")
             await state.sessions.release(claims.person_id)
 
     # Static frontend last, so /api/* and /ws win. html=True serves index.html at "/".

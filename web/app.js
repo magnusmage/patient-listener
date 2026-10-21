@@ -53,13 +53,17 @@
     const c = mode === 'audio' ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
             : mode === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
             : new window.PLClient.DemoEngine();
-    if (mode !== 'audio') c.setProfile([...state.needs][0] || 'finding_words');
+    c.setProfile([...state.needs][0] || 'finding_words');
     const on = (type, fn) => c.addEventListener(type, (e) => {
       if (c !== client) return;
       if (state.ended && state.ended.reason === 'safety' && type !== 'ended') return;
       trace(type, e.detail); fn(e.detail);
     });
 
+    on('caption', (d) => {
+      if (d.partial && state.captions.at(-1)?.who === 'you') state.captions.pop();
+      pushCaption(d.who || 'you', d.text);
+    });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
     on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
     on('state', (d) => { state.ringMode = d.state; updateRing(); });

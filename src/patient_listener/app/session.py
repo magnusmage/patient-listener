@@ -244,6 +244,10 @@ class AppSession:
     async def on_audio_partial(self, text: str) -> None:
         """Forward a transient caption. Partial ASR text never reaches storage or matching."""
         if not self.ended and text:
+            # Detect red flags before waiting for the ASR segment to finalize.
+            if safetymod.check(text) is not None:
+                await self._run_engine(("heard", text, self.now()))
+                return
             await self._emit([{"type": "caption", "who": "you", "text": text, "partial": True}])
 
     async def on_audio_final(self, text: str) -> None:

@@ -31,6 +31,7 @@ class Settings:
     asr_model: str = os.environ.get("ASR_MODEL", "nvidia/nemotron-speech-streaming-en-0.6b")
     tts_model: str = os.environ.get("TTS_MODEL", "nvidia/magpie_tts_multilingual_357m")
     tts_voice: str = os.environ.get("TTS_VOICE", "Aria")
+    voice_enabled: bool = _b("VOICE_ENABLED", False)
     asr_chunk_ms: int = int(os.environ.get("ASR_CHUNK_MS", "160"))
 
     # Starting wait values; an SLT tunes them per person within the PauseConfig ranges.
