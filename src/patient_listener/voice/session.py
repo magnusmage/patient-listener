@@ -162,9 +162,18 @@ class SessionEngine:
             # Resolve a Getting-words-out completeness check against the LLM.
             if any(isinstance(a, CheckComplete) for a in acts):
                 question = self.topic
-                complete = asyncio.run(
-                    self.llm.is_complete(question, self.last_heard, timeout_s=1.0)
-                )
+                complete = False
+                if self.store.is_ai_enabled():
+                    try:
+                        async def check_complete():
+                            return await asyncio.wait_for(
+                                self.llm.is_complete(question, self.last_heard, timeout_s=1.0),
+                                timeout=1.0,
+                            )
+                        complete = asyncio.run(check_complete())
+                    except Exception:
+                        # Uncertainty means keep waiting; Done remains available.
+                        complete = False
                 acts = [a for a in acts if not isinstance(a, CheckComplete)]
                 acts += self.controller.on_complete(complete, now)
             emitted = self._emit(acts, from_speech=False)

@@ -234,3 +234,32 @@ a93e87c fix: redact credentials for direct uvicorn startup
 ```
 
 The repository is currently clean after these commits. Future work should use one issue and one focused commit at a time, with relevant tests added before committing.
+
+
+## Token Factory session integration — 20 October 2026
+
+The patient WebSocket now selects a fresh TokenFactoryLlm per session when AI_ENABLED is true,
+NEBIUS_API_KEY is set, and the optional llm dependency is installed. Otherwise it uses templates.
+Replies still pass through the existing validator and fallback orchestration. Completeness calls
+now have a hard one-second deadline and check the database kill switch. Errors keep the session
+waiting; Done remains available. Completeness accepts only the JSON boolean true, and shares the
+Lightning session call cap with replies. HTTP clients close within each model call because the
+current engine creates a fresh event loop per call.
+
+Verification: 193 backend tests passed and release gates were green, using mocked model responses.
+No real API request was made. Real-key connectivity, deployed model IDs, latency, and account
+availability still require verification. Nightly planning is not connected by this change.
+
+To enable locally, install the project's llm extra, export NEBIUS_API_KEY privately in the server
+terminal, and restart. The application does not automatically load .env. Do not paste a real key
+into chat or commit it. Remove the key to return to local template mode.
+
+
+## LLM installation compatibility correction
+
+The workbook dependency ranges could not resolve because of conflicting jiter requirements.
+The llm extra now pins OpenAI 3.3.0, Instructor 1.17.0, and Tenacity 9.2.1. All three workbook
+libraries remain. This explicitly deviates from the workbook client version; provider and model
+choices remain unchanged. See DEPENDENCIES.md and requirements-llm-windows-py312.lock.
+The corrected editable installation succeeded, pip check reported no broken requirements, and
+all 193 backend tests passed with green release gates. No real API request was made.

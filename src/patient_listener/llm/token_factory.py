@@ -16,11 +16,12 @@ This module imports ``openai`` lazily so the package imports cleanly without it 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Optional
 
-from ..config import settings
+from ..config import Settings, settings as default_settings
 from ..ports import Llm
 from ..schemas import PlanFacts, ReplyFacts
 
@@ -56,31 +57,46 @@ def _strip_think(text: str) -> str:
 
 
 class TokenFactoryLlm(Llm):
-    def __init__(self) -> None:
-        from openai import AsyncOpenAI  # lazy: optional dependency
-
-        self._client = AsyncOpenAI(
-            base_url=settings.token_factory_base_url, api_key=settings.nebius_api_key
-        )
-        self._reply_model = settings.reply_model
-        self._plan_model = settings.plan_model
+    def __init__(self, settings: Settings | None = None, *, client_factory=None) -> None:
+        self.settings = settings or default_settings
+        self._client_factory = client_factory
+        self._reply_model = self.settings.reply_model
+        self._plan_model = self.settings.plan_model
         self._calls = 0
 
-    async def _json_call(self, model: str, system: str, user: str, max_tokens: int) -> dict:
-        resp = await self._client.chat.completions.create(
-            model=model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
+    async def _json_call(self, model: str, system: str, user: str, max_tokens: int,
+                         timeout_s: float) -> dict:
+        factory = self._client_factory
+        if factory is None:
+            from openai import AsyncOpenAI
+            factory = AsyncOpenAI
+        # SessionEngine uses a fresh event loop per call. Scope the HTTP client to that loop.
+        async with factory(base_url=self.settings.token_factory_base_url,
+                           api_key=self.settings.nebius_api_key,
+                           max_retries=0, timeout=timeout_s) as client:
+            resp = await asyncio.wait_for(client.chat.completions.create(
+                model=model,
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": user}],
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            ), timeout=timeout_s)
         content = _strip_think(resp.choices[0].message.content or "{}")
-        return json.loads(content or "{}")
+        data = json.loads(content or "{}")
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object")
+        return data
+
+    def _claim_call(self) -> bool:
+        if self._calls >= self.settings.max_lightning_calls_per_session:
+            return False
+        self._calls += 1
+        return True
 
     async def reply(self, facts: ReplyFacts, timeout_s: float) -> Optional[str]:
-        if self._calls >= settings.max_lightning_calls_per_session:
+        if not self._claim_call():
             return None  # LLM10: cap calls per session, then templates only
-        self._calls += 1
         user = json.dumps(
             {
                 "person_first_name": facts.person_first_name,
@@ -89,9 +105,11 @@ class TokenFactoryLlm(Llm):
                 "hint_level": int(facts.hint_level),
                 "found": list(facts.found),
                 "practice_words": list(facts.practice_words),
+                "needs": sorted(n.value for n in facts.needs),
+                "banned_phrases": sorted(facts.banned_phrases),
             }
         )
-        data = await self._json_call(self._reply_model, _REPLY_SYSTEM, user, max_tokens=60)
+        data = await self._json_call(self._reply_model, _REPLY_SYSTEM, user, max_tokens=60, timeout_s=timeout_s)
         line = data.get("line")
         return line if isinstance(line, str) and line.strip() else None
 
@@ -104,11 +122,13 @@ class TokenFactoryLlm(Llm):
                 "first_letter": facts.first_letter,
             }
         )
-        data = await self._json_call(self._plan_model, _MEANING_SYSTEM, user, max_tokens=60)
+        data = await self._json_call(self._plan_model, _MEANING_SYSTEM, user, max_tokens=60, timeout_s=10.0)
         meaning = data.get("meaning")
         return meaning if isinstance(meaning, str) and meaning.strip() else None
 
     async def is_complete(self, question: str, transcript: str, timeout_s: float) -> bool:
+        if not self._claim_call():
+            return False
         user = f'question: "{question}"\ntranscript: "{transcript}"'
-        data = await self._json_call(self._reply_model, _COMPLETE_SYSTEM, user, max_tokens=20)
-        return bool(data.get("complete"))
+        data = await self._json_call(self._reply_model, _COMPLETE_SYSTEM, user, max_tokens=20, timeout_s=timeout_s)
+        return data.get("complete") is True

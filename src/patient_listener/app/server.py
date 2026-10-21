@@ -24,6 +24,7 @@ from ..config import Settings, settings as default_settings
 
 from .access_log import install_access_log_redaction, redact_request_target
 from .audio import build_pipeline
+from ..llm.factory import build_llm
 from .console_api import router as console_router
 from .deps import build_state
 from .session import AppSession
@@ -144,7 +145,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def send(event: dict) -> None:
             await websocket.send_json(event)
 
-        app_session = AppSession(store=state.store, person_id=claims.person_id, send=send)
+        app_session = AppSession(store=state.store, person_id=claims.person_id, send=send,
+                                 llm=build_llm(state.settings))
         pipeline = build_pipeline(
             state.settings,
             on_speech=app_session.on_audio_speech,

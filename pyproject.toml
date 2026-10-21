@@ -21,7 +21,9 @@ voice = [
   "numpy~=2.5", "soundfile~=0.14", "librosa~=1.0", "pyloudnorm~=0.2", "soxr~=1.1",
   "audiotsm==0.1.2",
 ]
-llm = ["openai[aiohttp]~=3.24", "tenacity~=9.1", "instructor~=1.17"]
+# Workbook compatibility correction: Instructor 1.17 requires jiter<0.15.
+# OpenAI 3.3.0 is the newest release resolved with that bound; see docs/DEPENDENCIES.md.
+llm = ["openai[aiohttp]==3.3.0", "tenacity==9.2.1", "instructor==1.17.0"]
 matching = ["rapidfuzz~=3.14", "jellyfish~=1.2", "nltk~=3.10", "epitran~=1.35"]
 schedule = ["fsrs~=6.3"]
 api = ["fastapi~=0.142", "uvicorn[standard]~=0.54", "pydantic~=2.13", "pydantic-settings~=2.15"]
