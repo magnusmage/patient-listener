@@ -86,6 +86,7 @@ class AppSession:
             first_name=self.first_name,
             words=self.words,
             region=region,
+            target_only=True,  # each browser prompt practices one specific item
         )
         self.idx = 0
         self.current = None
@@ -95,6 +96,15 @@ class AppSession:
         self._ticker: Optional[asyncio.Task] = None
         self._advance: Optional[asyncio.Task] = None
         self._engine_lock = asyncio.Lock()
+        self._audio_idle = asyncio.Event()
+        self._audio_idle.set()
+
+    def set_audio_busy(self, busy: bool) -> None:
+        """Prevent advancing to another prompt before browser playback completes."""
+        if busy:
+            self._audio_idle.clear()
+        else:
+            self._audio_idle.set()
 
     # --- clock & context ------------------------------------------------------
 
@@ -338,6 +348,7 @@ class AppSession:
     async def _do_advance(self, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
+            await self._audio_idle.wait()
             if self.ended:
                 return
             self.idx += 1
@@ -356,5 +367,6 @@ class AppSession:
         self._advance = None
 
     def close(self) -> None:
+        self._audio_idle.set()
         self._cancel_ticker()
         self._cancel_advance()

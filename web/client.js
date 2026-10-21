@@ -246,6 +246,7 @@ class LiveDriver extends EventTarget {
     if (message.type === 'audioStart') { this.audioId = message.id; this.mute(true); }
     if (message.type === 'audioIdle') { this.audioId = null; this.mute(false); }
     if (message.type === 'voiceError') { this.stop(); return; }
+    if (message.type === 'safety' || message.type === 'ended') this.stop();
     this.dispatchEvent(new CustomEvent(message.type, { detail: message }));
   }
   _send(obj) { if (!this.stopped && this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj)); }

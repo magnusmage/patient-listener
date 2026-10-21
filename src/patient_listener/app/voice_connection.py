@@ -55,6 +55,11 @@ class VoiceConnection:
         with self.runtime.gpu_lock:
             return fn(*args)
 
+    def _audio_busy(self, busy):
+        setter = getattr(self.session, 'set_audio_busy', None)
+        if setter is not None:
+            setter(busy)
+
     async def start(self):
         from .nemo_stream import NemoStream
         self.decoder = await worker_call(
@@ -67,15 +72,18 @@ class VoiceConnection:
         if self.closed: return
         if event['type'] in {'safety', 'ended'}:
             self.closed = True
+            self._audio_busy(False)
             for task in self.tasks:
                 if task is not asyncio.current_task(): task.cancel()
             self.played.set()
             self._drain(self.input); self._drain(self.output)
             await self.send_json(event)
+            await self.socket.close(code=1000)
             return
         await self.send_json(event)
         text = spoken_text(event)
         if text:
+            self._audio_busy(True)
             # Sentence-by-sentence synthesis. A bounded queue fails visibly instead of growing forever.
             for sentence in re.split(r'(?<=[.!?])\s+', text):
                 self.output.put_nowait(sentence)
@@ -141,6 +149,7 @@ class VoiceConnection:
                 self.waiting_id = None
                 if self.output.empty():
                     self.busy = False
+                    self._audio_busy(False)
                     await self.send_json({'type': 'audioIdle'})
                     await self.session.on_audio_silence()
         except asyncio.CancelledError:
@@ -158,6 +167,7 @@ class VoiceConnection:
 
     async def close(self):
         self.closed = True
+        self._audio_busy(False)
         self.played.set()
         for task in self.tasks: task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)

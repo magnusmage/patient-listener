@@ -54,3 +54,20 @@ test('Stop ends output and capture and discards late audio', () => {
   c._message(new Int16Array([3,4]).buffer);
   assert.equal(sources.length,1);
 });
+
+
+test('Safety cancels playback even without an app-level safety listener', () => {
+  const {c,sources,tracks} = driver();
+  c._message(JSON.stringify({type:'audioStart',id:1}));
+  c._message(new Int16Array([1,2]).buffer);
+  let safetySeen = false;
+  c.addEventListener('safety', () => { safetySeen = true; });
+  c._message(JSON.stringify({type:'safety',card:'stroke_signs'}));
+  assert.equal(safetySeen,true);
+  assert.equal(c.stopped,true);
+  assert.equal(sources[0].didStop,true);
+  assert.equal(tracks.length,1);
+  c._message(JSON.stringify({type:'audioStart',id:2}));
+  c._message(new Int16Array([3,4]).buffer);
+  assert.equal(sources.length,1);
+});

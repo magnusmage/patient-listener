@@ -11,6 +11,7 @@ from patient_listener.voice.actions import (
     MoveOn,
     OfferRest,
     Play,
+    Praise,
     ShowHint,
     Stop,
 )
@@ -90,6 +91,21 @@ class TestInvariants(unittest.TestCase):
         c = PatienceController(PauseConfig(hint_order=order), target=word())
         first = [a.level for a in c.on_help() if isinstance(a, ShowHint)][0]
         self.assertEqual(first, HintLevel.SOUND)
+
+
+class TestMatchingScope(unittest.TestCase):
+    def test_open_plan_still_recognizes_another_approved_word(self):
+        leo = word()
+        biscuit = word('w2', 'Biscuit')
+        c = PatienceController(PauseConfig(), words=[leo, biscuit])
+        c.on_prompt(biscuit)
+        acts = c.on_heard(['Leo'], 1.0)
+        self.assertTrue(any(isinstance(a, Praise) and a.word.id == leo.id for a in acts))
+
+    def test_target_only_does_not_match_unapproved_target(self):
+        c = PatienceController(PauseConfig(), words=[word()], target_only=True)
+        c.on_prompt(word('not-approved', 'Biscuit'))
+        self.assertEqual(c.on_heard(['Biscuit'], 1.0), [])
 
 
 class TestGettingWordsOut(unittest.TestCase):

@@ -60,6 +60,7 @@ class SessionEngine:
     first_name: str = "Margaret"
     words: list[WordEntry] = field(default_factory=list)
     region: str = "UK"
+    target_only: bool = False
 
     controller: PatienceController = field(init=False)
     found: set[str] = field(default_factory=set)  # word texts found this session
@@ -77,6 +78,7 @@ class SessionEngine:
             cfg=self.cfg,
             session_id=self.session_id,
             words=self.words,
+            target_only=self.target_only,
         )
 
     # --- helpers --------------------------------------------------------------

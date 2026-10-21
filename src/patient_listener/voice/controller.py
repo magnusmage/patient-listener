@@ -47,6 +47,7 @@ class PatienceController:
     pending: Optional[Match] = None  # a 0.60-0.89 (or Being clear) match awaiting confirm
     turns: int = 0
     logged_this_turn: bool = False
+    target_only: bool = False  # prompted exercise; open conversation matches the plan
 
     # --- turn lifecycle -------------------------------------------------------
 
@@ -82,7 +83,8 @@ class PatienceController:
         """Any sound of speech resets the silence clock; we never talk over speech."""
         self.silence_started = None
         self.checked_complete = False  # the 'mm' cap is per turn, not per silence
-        if self.state in (State.SILENT, State.BACKCHANNELED, State.HINT_OFFERED):
+        # Preserve an offered hint while ASR recognizes a spoken yes/no answer.
+        if self.state in (State.SILENT, State.BACKCHANNELED):
             self.state = State.LISTENING
         return []
 
@@ -162,8 +164,14 @@ class PatienceController:
     # --- a word was heard -----------------------------------------------------
 
     def on_heard(self, tokens: list[str], now: float) -> list[Action]:
-        """Run the matcher against the word list. A model never decides success (FR-22)."""
-        match = best_match(tokens, self.words)
+        """Match the active exercise or open plan; models never decide success (FR-22)."""
+        if self.state == State.HINT_OFFERED:
+            # A normal utterance resumes practice; yes/no controls use on_answer instead.
+            self.state = State.LISTENING
+        candidates = self.words
+        if self.target_only and self.target is not None:
+            candidates = [w for w in self.words if w.id == self.target.id]
+        match = best_match(tokens, candidates)
         if match is None:
             return []  # below 0.60: treated as speech; the reply step handles it
 

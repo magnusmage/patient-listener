@@ -76,6 +76,7 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(entered.is_set())
                 await c.send({'type':'safety','card':'stroke_signs'})
                 self.assertEqual((await events.get())['type'],'safety')
+                c.socket.close.assert_awaited_once_with(code=1000)
                 release.set()
             finally:
                 release.set(); await c.close()
