@@ -33,6 +33,14 @@ class NemoStream:
         self.segment_samples = 0
         self.reset_decoder()
 
+    def reset_stream(self):
+        """Discard recognition and VAD history at playback/listening boundaries."""
+        self.pending.clear()
+        self.vad.reset_states()
+        self.speaking = False
+        self.quiet_samples = 0
+        self.reset_decoder()
+
     def reset_decoder(self):
         self.buffer = self.Buffer(self.model, online_normalization=True)
         self.cache = self.model.encoder.get_initial_cache_state(batch_size=1)

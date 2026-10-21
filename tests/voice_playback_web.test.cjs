@@ -27,18 +27,18 @@ function driver() {
   return { c, sent, sources, tracks, context };
 }
 
-test('PCM playback keeps capture muted until server audioIdle and acknowledges playback', () => {
+test('PCM playback keeps Stop capture active and acknowledges playback', () => {
   const {c,sent,sources,context} = driver();
   assert.equal(context.window.PLClient.mode(),'audio');
   c._message(JSON.stringify({type:'audioStart',id:7}));
-  assert.equal(c.muted,true);
+  assert.equal(c.muted,false);
   c._message(new Int16Array([0,32767,-32768]).buffer);
   assert.equal(sources.length,1);
   c._message(JSON.stringify({type:'audioEnd',id:7}));
   assert.equal(sent.length,0);
   sources[0].onended();
   assert.deepEqual(sent,[{type:'playback_done',id:7}]);
-  assert.equal(c.muted,true);
+  assert.equal(c.muted,false);
   c._message(JSON.stringify({type:'audioIdle'}));
   assert.equal(c.muted,false);
 });

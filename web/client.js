@@ -243,7 +243,8 @@ class LiveDriver extends EventTarget {
       return;
     }
     const message = JSON.parse(data);
-    if (message.type === 'audioStart') { this.audioId = message.id; this.mute(true); }
+    // Keep ASR input live for exact spoken Stop; the server ignores other playback speech.
+    if (message.type === 'audioStart') { this.audioId = message.id; }
     if (message.type === 'audioIdle') { this.audioId = null; this.mute(false); }
     if (message.type === 'voiceError') { this.stop(); return; }
     if (message.type === 'safety' || message.type === 'ended') this.stop();

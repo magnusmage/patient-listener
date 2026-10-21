@@ -50,6 +50,8 @@ class VoiceConnection:
         self.played = asyncio.Event()
         self.tasks = []
         self.decoder = None
+        self.input_epoch = 0
+        self.decoder_epoch = 0
 
     def _invoke(self, fn, *args):
         with self.runtime.gpu_lock:
@@ -92,11 +94,24 @@ class VoiceConnection:
     def _drain(queue):
         while not queue.empty(): queue.get_nowait()
 
+    def _set_playback(self, busy):
+        if self.busy != busy:
+            self.busy = busy
+            self.input_epoch += 1
+            self._drain(self.input)
+
+    def _decode(self, frame, epoch):
+        # Called under the GPU lock. Never carry echo/partial text into a listening turn.
+        if self.decoder_epoch != epoch:
+            self.decoder.reset_stream()
+            self.decoder_epoch = epoch
+        return self.decoder.feed(frame)
+
     async def frame(self, frame):
-        if not self.closed and not self.busy:
+        if not self.closed:
             if len(frame) > 32768 or len(frame) % 2:
                 raise ValueError('Invalid PCM16 frame')
-            self.input.put_nowait(frame)
+            self.input.put_nowait((frame, self.input_epoch))
 
     def acknowledge(self, sequence):
         if sequence == self.waiting_id:
@@ -105,11 +120,18 @@ class VoiceConnection:
     async def _listen(self):
         try:
             while not self.closed:
-                frame = await self.input.get()
-                if self.busy: continue
-                events = await worker_call(self._invoke, self.decoder.feed, frame)
+                frame, epoch = await self.input.get()
+                if epoch != self.input_epoch: continue
+                events = await worker_call(self._invoke, self._decode, frame, epoch)
+                if epoch != self.input_epoch: continue
                 for event in events:
                     if self.closed: break
+                    if self.busy:
+                        # FR-04: playback input is control-only, never captions or answers.
+                        if event.kind in {'partial', 'final'} and event.text.strip().lower().strip('.!?') == 'stop':
+                            await self.session.handle({'type': 'stop'})
+                            break
+                        continue
                     if event.kind == 'speech':
                         await self.session.on_audio_speech()
                     elif event.kind == 'partial':
@@ -133,7 +155,7 @@ class VoiceConnection:
         try:
             while not self.closed:
                 text = await self.output.get()
-                self.busy = True
+                self._set_playback(True)
                 self.session._cancel_ticker()
                 self._drain(self.input)
                 self.sequence += 1
@@ -148,7 +170,7 @@ class VoiceConnection:
                 await asyncio.wait_for(self.played.wait(), timeout=60)
                 self.waiting_id = None
                 if self.output.empty():
-                    self.busy = False
+                    self._set_playback(False)
                     self._audio_busy(False)
                     await self.send_json({'type': 'audioIdle'})
                     await self.session.on_audio_silence()
