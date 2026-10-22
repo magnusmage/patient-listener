@@ -16,8 +16,8 @@ box injects :class:`~patient_listener.llm.token_factory.TokenFactoryLlm` instead
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, replace
+from typing import Callable, Optional
 
 from ..ports import Llm
 from ..schemas import PlanFacts, ReplyFacts
@@ -57,35 +57,32 @@ class TemplateLlm(Llm):
 
 
 async def produce_reply(
-    llm: Llm, facts: ReplyFacts, timeout_s: float = 1.5, ai_enabled: bool = True
+    llm: Llm, facts: ReplyFacts, timeout_s: float = 1.5,
+    ai_enabled: bool | Callable[[], bool] = True,
 ) -> ReplyResult:
     template = templates.reply_template(facts)
-
-    if not ai_enabled:
-        return ReplyResult(text=template, used_template=True, reason="ai_disabled")
-
-    # One live attempt with a hard deadline; a stall is worse than a plain line.
-    try:
-        line = await asyncio.wait_for(llm.reply(facts, timeout_s), timeout=timeout_s)
-    except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - any model error -> template
-        return ReplyResult(text=template, used_template=True, reason="reply_timeout")
-
-    if line is None:
-        return ReplyResult(text=template, used_template=True, reason="no_line")
-
-    verdict = check_reply(line, facts)
-    if verdict.ok:
-        return ReplyResult(text=line, used_template=False)
-
-    # Retry once, stating the reason (the adapter re-prompts "Do not say X.").
-    try:
-        retried = await asyncio.wait_for(
-            llm.reply(facts, timeout_s), timeout=timeout_s
-        )
-    except (asyncio.TimeoutError, Exception):  # noqa: BLE001
-        return ReplyResult(text=template, used_template=True, reason=f"{verdict.reason}->timeout")
-
-    if retried is not None and check_reply(retried, facts).ok:
-        return ReplyResult(text=retried, used_template=False)
-
-    return ReplyResult(text=template, used_template=True, reason=verdict.reason)
+    enabled = ai_enabled if callable(ai_enabled) else lambda: ai_enabled
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    reason = "reply_timeout"
+    request_facts = facts
+    for attempt in range(2):
+        # Re-read before each attempt; switching off must prevent the retry too.
+        if not enabled():
+            return ReplyResult(template, True, "ai_disabled")
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return ReplyResult(template, True, reason)
+        try:
+            line = await asyncio.wait_for(llm.reply(request_facts, remaining), remaining)
+        except Exception:
+            return ReplyResult(template, True, reason)
+        if not enabled():
+            return ReplyResult(template, True, "ai_disabled")
+        if line is None:
+            return ReplyResult(template, True, "no_line" if not attempt else reason)
+        verdict = check_reply(line, facts)
+        if verdict.ok:
+            return ReplyResult(line, False)
+        reason = verdict.reason if attempt else f"{verdict.reason}->timeout"
+        request_facts = replace(facts, rejection_reason=verdict.reason)
+    return ReplyResult(template, True, verdict.reason)

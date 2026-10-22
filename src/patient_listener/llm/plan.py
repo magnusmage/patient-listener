@@ -19,9 +19,11 @@ from .validate import check_meaning_hint, check_reply
 __all__ = ["write_hints", "build_plan", "weekly_card"]
 
 
-def write_hints(llm, word: WordEntry) -> HintLines:
+def write_hints(llm, word: WordEntry, *, ai_enabled=lambda: True) -> HintLines:
     """Write and validate the three hint lines for one approved word (FR-41)."""
     meaning: Optional[str] = None
+    if not ai_enabled():
+        return hintmod.template_hint_lines(word)
     try:
         meaning = asyncio.run(llm.plan(PlanFacts(
             word=word.text,
@@ -32,6 +34,8 @@ def write_hints(llm, word: WordEntry) -> HintLines:
     except Exception:  # noqa: BLE001 - any model error -> template
         meaning = None
 
+    if not ai_enabled():
+        meaning = None
     if meaning is not None and not check_meaning_hint(meaning, word.text).ok:
         meaning = None  # one rejection -> template (nightly can also retry; omitted for brevity)
 

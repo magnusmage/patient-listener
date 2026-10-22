@@ -65,6 +65,7 @@ class SessionEngine:
     controller: PatienceController = field(init=False)
     found: set[str] = field(default_factory=set)  # word texts found this session
     last_heard: str = ""
+    turn_text: str = ""  # finalized segments for this turn only; never persisted
     topic: str = "photo"
     safety_card: Optional[str] = None
     carer_alerted: bool = False
@@ -88,14 +89,14 @@ class SessionEngine:
         return frozenset(names)
 
     def _reply_facts(self) -> ReplyFacts:
-        heard_tokens = self.last_heard.split()[-20:]
+        heard = self.turn_text if self.cfg.needs_complete_text else " ".join(self.turn_text.split()[-20:])
         return ReplyFacts(
             person_first_name=self.first_name,
             topic=self.topic,
             hint_level=self.controller.level,
             practice_words=tuple(w.text for w in self.words),
             found=tuple(sorted(self.found)),
-            last_words_heard=" ".join(heard_tokens),
+            last_words_heard=heard,
             needs=self.cfg.needs,
             allowed_names=self._allowed_names(),
             names_heard_this_turn=frozenset(),
@@ -109,7 +110,7 @@ class SessionEngine:
         facts = self._reply_facts()
         result = asyncio.run(
             produce_reply(
-                self.llm, facts, timeout_s=1.5, ai_enabled=self.store.is_ai_enabled()
+                self.llm, facts, timeout_s=1.5, ai_enabled=self.store.is_ai_enabled
             )
         )
         self.replies.append(result.text)
@@ -143,12 +144,14 @@ class SessionEngine:
 
     def feed(self, event: tuple) -> list[Action]:
         # Safety is terminal for this engine; a new session needs a new engine.
-        if self.controller.state == State.SAFETY_STOP:
+        if self.controller.state in (State.SAFETY_STOP, State.ENDED):
             return []
         kind = event[0]
         now = event[-1] if isinstance(event[-1], (int, float)) else 0.0
 
         if kind == "prompt":
+            self.last_heard = ""
+            self.turn_text = ""
             target = event[1]
             self.topic = event[2] if len(event) > 3 else self.topic
             self.person_speaking = False
@@ -169,10 +172,10 @@ class SessionEngine:
                     try:
                         async def check_complete():
                             return await asyncio.wait_for(
-                                self.llm.is_complete(question, self.last_heard, timeout_s=1.0),
+                                self.llm.is_complete(question, self.turn_text, timeout_s=1.0),
                                 timeout=1.0,
                             )
-                        complete = asyncio.run(check_complete())
+                        complete = asyncio.run(check_complete()) and self.store.is_ai_enabled()
                     except Exception:
                         # Uncertainty means keep waiting; Done remains available.
                         complete = False
@@ -186,8 +189,13 @@ class SessionEngine:
         if kind in ("heard", "typed"):
             text = event[1]
             self.last_heard = text
-            sig = safetymod.check(text)
+            if kind == "typed":
+                self.turn_text = text.strip()  # a typed answer can replace/edit speech
+            else:
+                self.turn_text = " ".join(part for part in (self.turn_text, text.strip()) if part)
+            sig = safetymod.check(self.turn_text)
             if sig is not None:
+                self.turn_text = self.last_heard = ""
                 self.safety_card = sig.card
                 self.controller.state = State.SAFETY_STOP
                 self.controller.pending = None
@@ -226,7 +234,9 @@ class SessionEngine:
 
         if kind == "confirm_tap":
             ok = event[1]
-            acts = self.controller.on_answer(ok, now)
+            if not isinstance(ok, bool):
+                raise ValueError("confirm_tap requires a boolean ok")
+            acts = self.controller.on_answer(ok, now, via_tap=True)
             emitted = self._emit(acts, from_speech=False)
             if any(isinstance(a, Praise) for a in emitted):
                 self._run_reply()
@@ -239,6 +249,7 @@ class SessionEngine:
             return emitted
 
         if kind == "stop":
+            self.turn_text = self.last_heard = ""
             return self._emit(self.controller.on_stop(now), from_speech=False)
 
         raise ValueError(f"unknown event: {kind}")

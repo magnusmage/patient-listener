@@ -35,6 +35,7 @@ _REPLY_SYSTEM = (
     "No lists, no emoji. Never say a practice word that is not in \"found\" unless hint_level "
     "is 3. Never correct grammar. Never say \"wrong\" or \"no\". No medical advice, medication, "
     "diagnosis or prognosis; if asked, say \"That's one for your doctor or therapist.\" "
+    "If rejection_reason is provided, correct that validation failure. "
     "Follow the profile rules exactly. You are an AI. Return JSON: {\"line\": \"...\"}."
 )
 
@@ -107,6 +108,7 @@ class TokenFactoryLlm(Llm):
                 "practice_words": list(facts.practice_words),
                 "needs": sorted(n.value for n in facts.needs),
                 "banned_phrases": sorted(facts.banned_phrases),
+                "rejection_reason": facts.rejection_reason,
             }
         )
         data = await self._json_call(self._reply_model, _REPLY_SYSTEM, user, max_tokens=60, timeout_s=timeout_s)

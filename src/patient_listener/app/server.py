@@ -190,7 +190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await direct_send(event)
 
             app_session = AppSession(store=state.store, person_id=claims.person_id, send=send,
-                                     llm=build_llm(state.settings))
+                                     llm=build_llm(state.settings, state.store))
             if voice:
                 connection = VoiceConnection(runtime, app_session, websocket, direct_send)
                 await connection.start()

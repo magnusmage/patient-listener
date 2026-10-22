@@ -1,5 +1,7 @@
 # Patient Listener: backend and AI project status
 
+> **Historical snapshot:** for the current code/workbook review at `c928b1f`, see [Progress audit - 21 October 2026](PROGRESS_AUDIT_2026-10-21.md). Older gaps and next steps below may be superseded.
+
 **Last updated:** 19 October 2026  
 **Scope of this document:** backend and AI work. The Patient Listener Workbook v1 is the source of truth for product and safety requirements.
 

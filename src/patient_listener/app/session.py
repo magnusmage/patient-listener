@@ -14,6 +14,7 @@ it cannot run inside this event loop; every call is dispatched to a worker threa
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Awaitable, Callable, Optional
 
 from ..llm.reply import TemplateLlm
@@ -91,6 +92,10 @@ class AppSession:
         self.idx = 0
         self.current = None
         self.ended = False
+        self.closing = False
+        self._started = False
+        self._session_limit = self.cfg.max_session_min
+        self._cap: Optional[asyncio.Task] = None
         self._t0 = 0.0
         self._loud = 0
         self._ticker: Optional[asyncio.Task] = None
@@ -144,16 +149,17 @@ class AppSession:
                 raise
 
     async def _run_engine(self, event: tuple) -> list:
-        if self.ended:
+        if self.ended or self.closing:
             return []
         before = len(self.engine.replies)
         acts = await self._feed(event)
-        if self.ended:
+        if self.ended or self.closing:
             return []
         if any(isinstance(a, SafetyStop) for a in acts):
             self.ended = True
             self._cancel_ticker()
             self._cancel_advance()
+            self._cancel_cap()
         events: list[Optional[dict]] = []
         for a in acts:
             events += bridge.action_to_events(a, self._ctx())
@@ -167,9 +173,12 @@ class AppSession:
     # --- lifecycle ------------------------------------------------------------
 
     async def start(self) -> None:
-        if self.ended:
+        if self.ended or self._started:
             return
+        self._started = True
         self._t0 = asyncio.get_running_loop().time()
+        self._session_limit = self.cfg.max_session_min
+        self._arm_cap()
         greeting = templates.greeting(self.first_name)
         await self._emit([{"type": "greeting", "text": greeting, "caption": greeting}])
         await self.next_prompt()
@@ -177,7 +186,7 @@ class AppSession:
     async def next_prompt(self) -> None:
         self._cancel_ticker()
         self._cancel_advance()
-        if self.ended:
+        if self.ended or self.closing:
             return
         self.current = self.words[self.idx % len(self.words)] if self.words else None
         payload = presenter.prompt_payload(self.current, self.cfg.feedback, self.profile)
@@ -185,8 +194,7 @@ class AppSession:
         if self.ended or self.engine.controller.state == State.SAFETY_STOP:
             return
         if any(isinstance(a, Stop) for a in acts):
-            self.ended = True
-            await self._emit([{"type": "ended", "reason": "done", "found": sorted(self.engine.found)}])
+            await self._finish("turn_cap")
             return
         if any(isinstance(a, OfferRest) for a in acts):
             await self._emit([{"type": "restOffer"}])
@@ -199,7 +207,11 @@ class AppSession:
         if self.ended:
             return
         name, data = bridge.client_message_to_event(msg)
-        if name == "start":
+        if self.closing and name != "stop":
+            return
+        if name == "extend_session":
+            self.extend_session(data.get("minutes"))
+        elif name == "start":
             await self.start()
         elif name == "pause":
             await self._pause()
@@ -217,7 +229,7 @@ class AppSession:
         elif name == "no":
             await self._run_engine(("no", self.now()))
         elif name == "confirm_tap":
-            await self._run_engine(("confirm_tap", bool(data.get("ok", False)), self.now()))
+            await self._run_engine(("confirm_tap", data["ok"], self.now()))
         elif name == "done":
             await self._run_engine(("done", self.now()))
         elif name == "rest":
@@ -231,6 +243,8 @@ class AppSession:
     async def stop(self) -> None:
         self._cancel_ticker()
         self._cancel_advance()
+        self._cancel_cap()
+        self.closing = False
         if self.ended:
             return
         self.ended = True
@@ -246,28 +260,29 @@ class AppSession:
 
     async def on_audio_speech(self) -> None:
         """Streaming ASR/VAD detected speech; this immediately stops the silence clock."""
-        if self.ended:
+        if self.ended or self.closing:
             return
         self._cancel_ticker()
         await self._run_engine(("speech", self.now()))
 
     async def on_audio_partial(self, text: str) -> None:
         """Forward a transient caption. Partial ASR text never reaches storage or matching."""
-        if not self.ended and text:
+        if not self.ended and not self.closing and text:
             # Detect red flags before waiting for the ASR segment to finalize.
-            if safetymod.check(text) is not None:
-                await self._run_engine(("heard", text, self.now()))
+            combined = " ".join(part for part in (self.engine.turn_text, text) if part)
+            if safetymod.check(combined) is not None:
+                await self._run_engine(("typed", combined, self.now()))
                 return
             await self._emit([{"type": "caption", "who": "you", "text": text, "partial": True}])
 
     async def on_audio_final(self, text: str) -> None:
         """A final ASR transcript follows the same safety and controller path as typed text."""
-        if not self.ended and text:
+        if not self.ended and not self.closing and text:
             await self._heard("heard", text)
 
     async def on_audio_silence(self) -> None:
         """VAD found silence; resume the existing server-side patience clock."""
-        if not self.ended:
+        if not self.ended and not self.closing:
             await self._pause()
 
     # --- heard / spoken input -------------------------------------------------
@@ -324,7 +339,7 @@ class AppSession:
     async def _silence_step(self) -> bool:
         """Feed one ``silence`` tick; return True when the turn has ended (stop ticking)."""
         acts = await self._run_engine(("silence", self.now()))
-        return self.ended or any(isinstance(a, (MoveOn, EndTurn, Stop)) for a in acts)
+        return self.ended or self.closing or any(isinstance(a, (MoveOn, EndTurn, Stop)) for a in acts)
 
     # --- turn advancement -----------------------------------------------------
 
@@ -333,6 +348,7 @@ class AppSession:
             return
         if any(isinstance(a, Stop) for a in acts):
             self.ended = True
+            self._cancel_cap()
             return
         if any(isinstance(a, Praise) for a in acts):
             self._schedule_advance(1.6)
@@ -356,6 +372,64 @@ class AppSession:
         except asyncio.CancelledError:  # pragma: no cover
             pass
 
+    # --- elapsed-session cap (includes rests; never resets on another Start) ---
+
+    def _cancel_cap(self) -> None:
+        if self._cap and self._cap is asyncio.current_task():
+            return
+        if self._cap and not self._cap.done():
+            self._cap.cancel()
+        self._cap = None
+
+    def _arm_cap(self) -> None:
+        self._cancel_cap()
+        if self._started and self._session_limit is not None and not self.ended:
+            self._cap = asyncio.create_task(self._watch_cap())
+
+    def extend_session(self, minutes: int | None) -> None:
+        """Patient controls can lengthen/remove the cap, never shorten it (FR-61)."""
+        if minutes is not None:
+            if type(minutes) is not int:
+                raise ValueError("session minutes must be an integer or null")
+            replace(self.cfg, max_session_min=minutes)  # enforce PauseConfig ranges
+            if self._session_limit is None or minutes < self._session_limit:
+                raise ValueError("patients may only lengthen or remove the session cap")
+        self._session_limit = minutes
+        self._arm_cap()
+
+    async def _watch_cap(self) -> None:
+        try:
+            while not self.ended and not self.closing and self._session_limit is not None:
+                remaining = self._session_limit * 60 - self.now()
+                if remaining <= 0:
+                    await self._finish("session_cap")
+                    return
+                await asyncio.sleep(remaining)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self._cap is asyncio.current_task():
+                self._cap = None
+
+    async def _finish(self, reason: str) -> None:
+        if self.ended or self.closing:
+            return
+        self.closing = True
+        self._cancel_ticker()
+        self._cancel_advance()
+        self._cancel_cap()
+        # Replace pending practice audio, then allow the fixed closing line to finish.
+        await self._emit([{"type": "reply", "text": "Well done today.", "replace_audio": True}])
+        await self._audio_idle.wait()
+        if self.ended:  # Stop/disconnect can interrupt the closing line.
+            return
+        await self._feed(("stop", self.now()))
+        if self.ended:
+            return
+        self.ended = True
+        self.closing = False
+        await self._emit([{"type": "ended", "reason": reason, "found": sorted(self.engine.found)}])
+
     def _cancel_ticker(self) -> None:
         if self._ticker and not self._ticker.done() and self._ticker is not asyncio.current_task():
             self._ticker.cancel()
@@ -367,6 +441,9 @@ class AppSession:
         self._advance = None
 
     def close(self) -> None:
+        self.ended = True
+        self.closing = False
+        self._cancel_cap()
         self._audio_idle.set()
         self._cancel_ticker()
         self._cancel_advance()

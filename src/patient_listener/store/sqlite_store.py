@@ -61,7 +61,8 @@ def _now() -> str:
 
 
 class SqliteStore:
-    def __init__(self, path: str = ":memory:", check_same_thread: bool = True) -> None:
+    def __init__(self, path: str = ":memory:", check_same_thread: bool = True,
+                 *, ai_enabled: bool | None = None) -> None:
         # ``check_same_thread=False`` lets the app server reuse one connection across the
         # event-loop / threadpool boundary (access stays serialized there). Defaults to True so
         # existing callers and tests are unaffected.
@@ -70,7 +71,13 @@ class SqliteStore:
         self._db.executescript("PRAGMA journal_mode=WAL;" + _SCHEMA)
         self._db.commit()
         if self._get_kv("ai_enabled") is None:
-            self._set_kv("ai_enabled", "1")
+            if ai_enabled is None:
+                from ..config import Settings
+                ai_enabled = Settings().ai_enabled
+            # Never overwrite an operator's persisted switch on restart.
+            self._db.execute("INSERT OR IGNORE INTO kv(k,v) VALUES ('ai_enabled',?)",
+                             ("1" if ai_enabled else "0",))
+            self._db.commit()
 
     # --- kv / kill switch -----------------------------------------------------
 

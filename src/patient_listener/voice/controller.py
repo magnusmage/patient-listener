@@ -142,7 +142,7 @@ class PatienceController:
 
     # --- yes / no -------------------------------------------------------------
 
-    def on_answer(self, yes: bool, now: float) -> list[Action]:
+    def on_answer(self, yes: bool, now: float, *, via_tap: bool = False) -> list[Action]:
         if self.state == State.HINT_OFFERED:
             if yes:
                 return self.on_help(now)
@@ -150,6 +150,9 @@ class PatienceController:
             self.silence_started = None
             return []
         if self.state == State.CONFIRMING and self.pending is not None:
+            if yes and Need.BEING_CLEAR in self.cfg.needs and not via_tap:
+                # FR-14: hearing yes cannot substitute for the person's check tap.
+                return []
             if yes:
                 match = self.pending
                 self.pending = None

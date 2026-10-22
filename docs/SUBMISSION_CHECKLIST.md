@@ -1,5 +1,7 @@
 # Submission readiness audit and three-day execution checklist
 
+> **Historical snapshot:** for the current code/workbook review at `c928b1f`, see [Progress audit - 21 October 2026](PROGRESS_AUDIT_2026-10-21.md). Older gaps and next steps below may be superseded.
+
 **Audit date:** 21 October 2026, Asia/Karachi.  
 **Source:** `C:/Users/Mage/Downloads/Patient Listener Workbook v1.html`.  
 **Target:** all workbook MUST requirements plus the submission deliverables; no silent scope cuts.  

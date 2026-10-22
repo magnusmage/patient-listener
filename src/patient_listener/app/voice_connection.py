@@ -82,6 +82,18 @@ class VoiceConnection:
             await self.send_json(event)
             await self.socket.close(code=1000)
             return
+        if event.get('replace_audio'):
+            self._drain(self.output)
+            task = self.tasks[1] if self.tasks else None
+            if task is not None:
+                task.cancel()  # no old binary frames may follow audioCancel
+            await self.send_json({'type': 'audioCancel'})
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+                if self.closed: return
+                self.tasks[1] = asyncio.create_task(self._speak())
+            self.waiting_id = None
+            self._set_playback(False)
         await self.send_json(event)
         text = spoken_text(event)
         if text:

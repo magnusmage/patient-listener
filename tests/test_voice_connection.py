@@ -150,3 +150,26 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 c.session.on_audio_final.assert_awaited_once_with('Biscuit')
             finally:
                 release.set(); await c.close()
+
+
+    async def test_closing_replaces_queued_audio_and_waits_for_new_playback(self):
+        c, events = self.connection()
+        c.session.set_audio_busy = lambda busy: None
+        with patch('patient_listener.app.nemo_stream.NemoStream', Decoder), patch(
+            'patient_listener.app.nemo_stream.synthesize', return_value=b'\0\0') as synth:
+            await c.start()
+            try:
+                await c.send({'type':'reply','text':'Old first. Old queued.'})
+                await events.get(); await events.get(); await events.get()
+                self.assertTrue(c.busy)
+                await c.send({'type':'reply','text':'Well done today.','replace_audio':True})
+                self.assertEqual((await events.get())['type'], 'audioCancel')
+                self.assertEqual((await events.get())['text'], 'Well done today.')
+                start = await events.get()
+                self.assertEqual(start['type'], 'audioStart')
+                await events.get()  # audioEnd
+                c.acknowledge(start['id'])
+                self.assertEqual((await asyncio.wait_for(events.get(),1))['type'], 'audioIdle')
+                texts = [call.args[1] for call in synth.call_args_list]
+                self.assertEqual(texts, ['Old first.', 'Well done today.'])
+            finally: await c.close()

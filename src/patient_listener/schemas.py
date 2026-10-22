@@ -208,6 +208,7 @@ class ReplyFacts:
     allowed_names: frozenset[str] = field(default_factory=frozenset)
     names_heard_this_turn: frozenset[str] = field(default_factory=frozenset)
     pending_confirm: bool = False
+    rejection_reason: str = ""  # machine-readable correction instruction, no transcript
     banned_phrases: frozenset[str] = field(default_factory=frozenset)
 
 

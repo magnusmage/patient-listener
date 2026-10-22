@@ -71,3 +71,21 @@ test('Safety cancels playback even without an app-level safety listener', () => 
   c._message(new Int16Array([3,4]).buffer);
   assert.equal(sources.length,1);
 });
+
+
+test('audioCancel discards old playback without ending the session or acknowledging it', () => {
+  const {c,sources,sent,tracks} = driver();
+  c._message(JSON.stringify({type:'audioStart',id:1}));
+  c._message(new Int16Array([1,2]).buffer);
+  c._message(JSON.stringify({type:'audioCancel'}));
+  assert.equal(sources[0].didStop,true);
+  assert.equal(sources[0].onended,null);
+  assert.equal(c.audioId,null);
+  assert.equal(c.stopped,false);
+  assert.equal(tracks.length,0);
+  assert.equal(sent.length,0);
+  c._message(JSON.stringify({type:'audioStart',id:2}));
+  c._message(new Int16Array([3,4]).buffer);
+  sources[1].onended();
+  assert.deepEqual(sent,[{type:'playback_done',id:2}]);
+});

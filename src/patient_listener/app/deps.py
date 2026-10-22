@@ -31,12 +31,12 @@ class AppState:
 def build_state(db_path: str = ":memory:", settings: Settings | None = None) -> AppState:
     """Create and seed the application state. ``:memory:`` keeps a throwaway demo database."""
     cfg = settings or default_settings
-    store = SqliteStore(db_path, check_same_thread=False)
+    store = SqliteStore(db_path, check_same_thread=False, ai_enabled=cfg.ai_enabled)
     people = seed_all(store)
     signer = TokenSigner(secret=cfg.session_token_secret or None, ttl_s=cfg.session_token_ttl_s)
     demo_store = None
     if cfg.console_demo_enabled:
-        demo_store = SqliteStore(check_same_thread=False)
+        demo_store = SqliteStore(check_same_thread=False, ai_enabled=cfg.ai_enabled)
         demo_people = seed_all(demo_store)
         demo_store.set_console_user("judge-demo", "Judge demo", "therapist")
         for pid in demo_people.values():

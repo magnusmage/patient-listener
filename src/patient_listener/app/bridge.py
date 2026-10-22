@@ -125,7 +125,10 @@ def client_message_to_event(msg: dict) -> tuple[str, dict]:
     if kind in _DIRECT:
         return _DIRECT[kind], {}
     if kind == "confirm_tap":
-        return ("confirm_tap", {"ok": bool(msg.get("ok", False))})
+        ok = msg.get("ok")
+        if not isinstance(ok, bool):
+            raise ValueError("confirm_tap requires a boolean ok")
+        return ("confirm_tap", {"ok": ok})
     if kind == "typed":
         return ("typed", {"text": str(msg.get("text", ""))})
     if kind == "demo_say":

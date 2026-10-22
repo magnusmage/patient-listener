@@ -31,7 +31,7 @@ def run_for_person(
     # 1. Validate + store hint lines for every approved word.
     hinted = 0
     for word in store.words(person_id):
-        lines = planmod.write_hints(llm, word)
+        lines = planmod.write_hints(llm, word, ai_enabled=store.is_ai_enabled)
         store.set_word_hints(word.id, lines)
         hinted += 1
 
