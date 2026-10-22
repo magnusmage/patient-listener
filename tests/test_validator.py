@@ -78,6 +78,29 @@ class TestValidator(unittest.TestCase):
                                     facts(needs=frozenset({Need.FINDING_WORDS}))).ok)
 
 
+    def test_reported_appearance_comparison_is_rejected(self):
+        f = facts(last_words_heard="Is this a biscuit?", found=("Biscuit",))
+        for line in ("You look like a fox.", "You seem like a fox.",
+                     "I can see a fox.", "Your face looks like a fox."):
+            with self.subTest(line=line):
+                self.assertEqual(check_reply(line, f).reason, "unsupported_claim")
+
+    def test_unrelated_lowercase_content_is_rejected(self):
+        f = facts(last_words_heard="Is this a biscuit?", found=("Biscuit",))
+        for line in ("Tell me about the fox.", "The spaceship is lovely.", ""):
+            self.assertEqual(check_reply(line, f).reason, "ungrounded_content")
+
+    def test_question_can_use_the_persons_own_content(self):
+        f = facts(last_words_heard="I saw a fox near the garden.")
+        self.assertTrue(check_reply("Tell me more about the fox.", f).ok)
+        # Heard content does not license the AI to claim visual access.
+        self.assertEqual(check_reply("I can see the fox.", f).reason, "unsupported_claim")
+
+    def test_neutral_followup_does_not_need_new_content(self):
+        f = facts(last_words_heard="Is this a biscuit?", found=("Biscuit",))
+        self.assertTrue(check_reply("Thanks. What else would you like to say?", f).ok)
+
+
 class TestMeaningHint(unittest.TestCase):
     def test_meaning_must_not_contain_word(self):
         self.assertFalse(check_meaning_hint("A kettle boils water.", "kettle").ok)

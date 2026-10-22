@@ -11,6 +11,7 @@ emits audio while the person is speaking.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -113,6 +114,8 @@ class SessionEngine:
                 self.llm, facts, timeout_s=1.5, ai_enabled=self.store.is_ai_enabled
             )
         )
+        logging.getLogger("uvicorn.error.patient_listener.llm").info(
+            "Live reply source=%s", "template" if result.used_template else "model")
         self.replies.append(result.text)
         self._emit([Speak(result.text)], from_speech=False)
 

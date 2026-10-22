@@ -75,3 +75,49 @@ class TokenFactoryTests(unittest.IsolatedAsyncioTestCase):
             cfg = Settings(nebius_api_key='test', ai_enabled=True)
             self.assertIsInstance(build_llm(cfg), TokenFactoryLlm)
             self.assertIsNot(build_llm(cfg), build_llm(cfg))
+
+
+    async def test_request_logs_show_call_without_content_or_key(self):
+        model, client = self.adapter('{"line":"private-response-marker"}')
+        with self.assertLogs('uvicorn.error.patient_listener.llm', level='INFO') as logs:
+            await model.reply(_facts(), 0.1)
+        output = '\n'.join(logs.output)
+        self.assertIn('request started model=', output)
+        self.assertIn('outcome=response_json', output)
+        self.assertIn('elapsed_s=', output)
+        self.assertNotIn('private-response-marker', output)
+        self.assertNotIn('test-only', output)
+        self.assertNotIn('last_words_heard', output)
+        self.assertEqual(len(client.calls), 1)
+
+    async def test_error_logs_do_not_include_exception_message(self):
+        model, client = self.adapter('{}')
+        async def fail(**kwargs):
+            raise RuntimeError('SECRET-request-and-transcript')
+        client.create = fail
+        with self.assertLogs('uvicorn.error.patient_listener.llm', level='INFO') as logs:
+            result = await produce_reply(model, _facts())
+        self.assertTrue(result.used_template)
+        output = '\n'.join(logs.output)
+        self.assertIn('error_type=RuntimeError', output)
+        self.assertNotIn('SECRET', output)
+
+    async def test_cancelled_request_and_call_cap_are_visible(self):
+        model, _ = self.adapter('{}', cap=1, delay=1)
+        with self.assertLogs('uvicorn.error.patient_listener.llm', level='INFO') as logs:
+            await produce_reply(model, _facts(), timeout_s=0.01)
+            await model.reply(_facts(), 0.1)
+        output = '\n'.join(logs.output)
+        self.assertIn('outcome=cancelled', output)
+        self.assertIn('reason=session_call_limit', output)
+
+
+    async def test_ungrounded_model_reply_retries_then_uses_template(self):
+        model, client = self.adapter('{"line":"You look like a fox."}')
+        result = await produce_reply(model, _facts(last_words_heard='Is this a biscuit?', found=('Biscuit',)))
+        self.assertTrue(result.used_template)
+        self.assertEqual(result.reason, 'unsupported_claim')
+        self.assertNotIn('fox', result.text)
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn('unsupported_claim', client.calls[1]['messages'][1]['content'])
+        self.assertIn('text only', client.calls[0]['messages'][0]['content'])

@@ -26,6 +26,43 @@ class Verdict:
     reason: str = ""
 
 
+# Conservative lexical grounding for short practice replies. Content outside these
+# conversational words must occur in the supplied facts; this is not a semantic proof.
+_CONVERSATION_WORDS = frozenset("""
+a an the i i'm i've i'd i'll me my mine we we're we've we'd we'll us our ours
+ you you're you've you'd you'll your yours it it's its this that that's these those
+ he he's his him she she's her hers they they're them their theirs
+ is isn't are aren't was wasn't were weren't be been being am do don't does doesn't
+ did didn't doing have haven't has hasn't had hadn't can can't could couldn't
+ would wouldn't will won't shall should shouldn't may might must
+ and or but if then so because as at by for from in into of on to with without
+ about after before again also all any each every just more much many some same
+ else other another now next today here there where when what what's which who who's
+ how why yes okay ok thanks thank lovely nice good well done
+ tell say said saying talk talking share describe ask asked question answer
+ want wants wanted like likes liked would let let's try trying practice practising
+ time take keep go going get got something anything everything nothing
+ see photo picture look word words sound sounds start started finish finished
+ help please together little bit once repeat ready welcome
+""".split())
+_UNSUPPORTED_CLAIM = re.compile(
+    r"\b(?:you|he|she|they)\s+(?:look|looks|looked|seem|seems|seemed|sound|sounds|sounded)\b"
+    r"|\b(?:your|his|her|their)\s+(?:face|appearance|body|voice)\b"
+    r"|\b(?:i|we)\s+(?:(?:can|could)\s+)?(?:see|hear|saw|heard|watch|watching)\b",
+    re.I,
+)
+
+
+def _grounded(line: str, tokens: list[str], facts: ReplyFacts) -> bool:
+    context = " ".join((facts.last_words_heard, facts.topic, facts.person_first_name,
+                        *facts.found, *facts.allowed_names, *facts.names_heard_this_turn))
+    allowed = _CONVERSATION_WORDS | {t.lower() for t in tokenize(context)}
+    # Word-level hints may name a practice word, but do not license new facts.
+    if int(facts.hint_level) >= 3:
+        allowed |= {t.lower() for w in facts.practice_words for t in tokenize(w)}
+    return bool(tokens) and all(t.lower() in allowed for t in tokens)
+
+
 def _reject(reason: str) -> Verdict:
     return Verdict(ok=False, reason=reason)
 
@@ -93,6 +130,11 @@ def check_reply(line: str, facts: ReplyFacts) -> Verdict:
 
     if NEGATIVE.search(line):
         return _reject("negative_feedback")
+
+    if _UNSUPPORTED_CLAIM.search(line):
+        return _reject("unsupported_claim")
+    if not _grounded(line, tokens, facts):
+        return _reject("ungrounded_content")
 
     return _ok()
 
