@@ -23,7 +23,6 @@ from ..store.sqlite_store import SqliteStore
 from ..types import Feedback, Need, State
 from ..voice import safety as safetymod
 from ..voice.actions import EndTurn, MoveOn, OfferRest, Praise, SafetyStop, Stop
-from ..voice.merge import merge
 from ..voice.session import SessionEngine
 from ..llm import templates
 from . import bridge, presenter
@@ -74,7 +73,7 @@ class AppSession:
         self.region = region
         self.first_name = store.person_name(person_id)
         needs = store.person_needs(person_id)
-        self.cfg = merge(needs)
+        self.cfg = store.person_pause(person_id)
         self.words = store.words(person_id)
         self.profile = next((n.value for n in _PROFILE_ORDER if n in needs), "finding_words")
         self.feedback = presenter.feedback_key(self.cfg.feedback)
@@ -210,7 +209,11 @@ class AppSession:
         if self.closing and name != "stop":
             return
         if name == "extend_session":
-            self.extend_session(data.get("minutes"))
+            if set(data) != {"minutes"}:
+                raise ValueError("extend_session requires minutes only")
+            await self._extend_settings({"max_session_min": data["minutes"]})
+        elif name == "extend_settings":
+            await self._extend_settings(data)
         elif name == "start":
             await self.start()
         elif name == "pause":
@@ -386,16 +389,24 @@ class AppSession:
         if self._started and self._session_limit is not None and not self.ended:
             self._cap = asyncio.create_task(self._watch_cap())
 
-    def extend_session(self, minutes: int | None) -> None:
-        """Patient controls can lengthen/remove the cap, never shorten it (FR-61)."""
-        if minutes is not None:
-            if type(minutes) is not int:
-                raise ValueError("session minutes must be an integer or null")
-            replace(self.cfg, max_session_min=minutes)  # enforce PauseConfig ranges
-            if self._session_limit is None or minutes < self._session_limit:
-                raise ValueError("patients may only lengthen or remove the session cap")
-        self._session_limit = minutes
-        self._arm_cap()
+    async def _extend_settings(self, changes: dict) -> None:
+        from ..profile_settings import extend_only
+        async with self._engine_lock:
+            if self.ended or self.closing:
+                return
+            current = replace(self.cfg, max_session_min=self._session_limit)
+            try:
+                clean = extend_only(current, changes)
+                self.store.patient_extend_profile(self.person_id, clean)
+            except PermissionError as exc:
+                raise ValueError(str(exc)) from exc  # invalid WebSocket control
+            self.cfg = replace(current, **clean)
+            self.engine.cfg = self.cfg
+            self.engine.controller.cfg = self.cfg
+        if 'max_session_min' in clean:
+            self._session_limit = clean['max_session_min']
+            self._arm_cap()
+        await self._emit([{"type": "settingsSaved"}])
 
     async def _watch_cap(self) -> None:
         try:

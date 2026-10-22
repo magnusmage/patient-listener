@@ -181,6 +181,9 @@ class SessionCapTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.store = SqliteStore(check_same_thread=False, ai_enabled=False)
         self.pid = seed_all(self.store)['margaret']
+        self.store.set_console_user('test-helper','Helper','therapist')
+        self.store.link_console_user('test-helper',self.pid)
+        self.store.console_update_profile(self.pid, {'max_session_min':3}, actor='test-helper')
         self.events = []
         self.audio = False
         async def send(event):
@@ -232,7 +235,8 @@ class SessionCapTests(unittest.IsolatedAsyncioTestCase):
         self.time = 100000
         await self.s._watch_cap()
         self.assertFalse(self.s.ended)
-        with self.assertRaises(ValueError): self.s.extend_session(20)
+        with self.assertRaises(ValueError):
+            await self.s.handle({'type':'extend_session','minutes':20})
 
     async def test_cap_still_applies_during_rest(self):
         await self.s.handle({'type':'rest'})

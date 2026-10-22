@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS attempts (
 CREATE TABLE IF NOT EXISTS cards (person_id TEXT, word_id TEXT, card TEXT,
     PRIMARY KEY (person_id, word_id));
 CREATE TABLE IF NOT EXISTS plans (person_id TEXT PRIMARY KEY, mode TEXT, items TEXT, pause TEXT);
+CREATE TABLE IF NOT EXISTS person_settings (person_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS consents (person_id TEXT, kind TEXT, granted INTEGER, at TEXT,
     PRIMARY KEY (person_id, kind));
 CREATE TABLE IF NOT EXISTS audit (
@@ -222,10 +223,59 @@ class SqliteStore:
         return row["first_name"] if row else person_id
 
     def person_needs(self, person_id: str) -> frozenset[Need]:
+        saved = self._profile_overrides(person_id)
+        if "needs" in saved:
+            return frozenset(Need(n) for n in saved["needs"])
         row = self._db.execute("SELECT needs FROM people WHERE id=?", (person_id,)).fetchone()
         if not row or not row["needs"]:
             return frozenset({Need.FINDING_WORDS})
         return frozenset(Need(n) for n in json.loads(row["needs"]))
+
+    # --- saved profile settings ---------------------------------------------
+
+    def _profile_overrides(self, person_id: str) -> dict:
+        row = self._db.execute("SELECT data FROM person_settings WHERE person_id=?",
+                               (person_id,)).fetchone()
+        return json.loads(row['data']) if row else {}
+
+    def person_pause(self, person_id: str) -> PauseConfig:
+        from ..profile_settings import resolve_profile
+        return resolve_profile(self.person_needs(person_id), self._profile_overrides(person_id))
+
+    def can_manage_profile(self, person_id: str, actor: str) -> bool:
+        user = self._db.execute("SELECT role FROM console_users WHERE id=?", (actor,)).fetchone()
+        return bool(user and person_id in self.linked_people(actor) and (
+            user['role'] == 'therapist' or
+            (user['role'] == 'carer' and not self.has_linked_therapist(person_id))))
+
+    def _save_profile(self, person_id: str, changes: dict, actor: str) -> PauseConfig:
+        from ..profile_settings import resolve_profile
+        saved = self._profile_overrides(person_id)
+        saved.update(changes)
+        needs = frozenset(Need(n) for n in saved['needs']) if 'needs' in saved else self.person_needs(person_id)
+        if 'needs' in changes and Need.WORDS_OUT in needs:
+            for name in ('backchannel_s', 'offer_hint_s'):
+                if name not in changes and saved.get(name) is not None:
+                    saved.pop(name, None)  # discard incompatible overrides from the old profile
+        cfg = resolve_profile(needs, saved)  # validate everything before any write
+        self._db.execute("INSERT INTO person_settings(person_id,data) VALUES (?,?) "
+                         "ON CONFLICT(person_id) DO UPDATE SET data=excluded.data",
+                         (person_id, json.dumps(saved)))
+        self._db.commit()
+        self._audit(actor, 'update_profile', person_id)
+        return cfg
+
+    def console_update_profile(self, person_id: str, changes: dict, *, actor: str) -> PauseConfig:
+        from ..profile_settings import normalize_changes
+        if not self.can_manage_profile(person_id, actor):
+            raise PermissionError('Only the linked therapist, or carer without a therapist, can change settings')
+        return self._save_profile(person_id, normalize_changes(changes), actor)
+
+    def patient_extend_profile(self, person_id: str, changes: dict) -> PauseConfig:
+        from ..profile_settings import extend_only
+        if not self.person_exists(person_id):
+            raise KeyError(person_id)
+        return self._save_profile(person_id, extend_only(self.person_pause(person_id), changes), person_id)
 
     # --- words ----------------------------------------------------------------
 
@@ -387,7 +437,7 @@ class SqliteStore:
         row = self._db.execute(
             "SELECT * FROM plans WHERE person_id=?", (person_id,)
         ).fetchone()
-        pause = _pause_from_needs(self.person_needs(person_id))
+        pause = self.person_pause(person_id)
         if row is None:
             # Default plan: every approved word, naming prompt (plan_missing fallback).
             items = tuple(
@@ -458,7 +508,7 @@ class SqliteStore:
     def delete_all(self, person_id: str) -> dict:
         """Delete everything for one person; completes immediately here (<= 24 h in prod)."""
         counts = {}
-        for table in ("words", "attempts", "cards", "plans", "consents", "console_links", "people"):
+        for table in ("words", "attempts", "cards", "plans", "consents", "person_settings", "console_links", "people"):
             col = "id" if table == "people" else "person_id"
             cur = self._db.execute(f"DELETE FROM {table} WHERE {col}=?", (person_id,))
             counts[table] = cur.rowcount

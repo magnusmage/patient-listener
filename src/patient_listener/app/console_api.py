@@ -183,20 +183,51 @@ def _cell_code(row: dict) -> str:
     return "none"
 
 
-@router.get("/settings/{person}")
-async def settings(request: Request, person: str, access: Access) -> dict:
-    store = access.store
-    pid = _resolve(request, person, access)
-    from ..voice.merge import merge
-
-    cfg = merge(store.person_needs(pid))
+def _settings_payload(person: str, pid: str, access: ConsoleAccess) -> dict:
+    from ..profile_settings import profile_values
+    cfg = access.store.person_pause(pid)
     return {
         "person": person,
-        "needs": [_NEED_LABEL.get(n, n.value) for n in store.person_needs(pid)],
+        "needs": [_NEED_LABEL.get(n, n.value) for n in sorted(cfg.needs, key=lambda n:n.value)],
+        "needKeys": sorted(n.value for n in cfg.needs),
         "hintOrder": "meaning-first" if cfg.hint_order[0].name == "MEANING" else "sound-first",
         "hintWait": cfg.offer_hint_s,
+        "backchannelWait": cfg.backchannel_s,
+        "maxWait": cfg.max_wait_s,
         "sessionMin": cfg.max_session_min,
+        "canEdit": access.store.can_manage_profile(pid, access.user_id),
+        "values": profile_values(cfg),
     }
+
+
+class ProfileSettingsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    needs: list[str] | None = None
+    hint_order: list[str] | None = None
+    backchannel_s: float | None = Field(default=None, ge=2, le=15)
+    offer_hint_s: float | None = Field(default=None, ge=4, le=15)
+    max_wait_s: float | None = Field(default=None, ge=8, le=120)
+    max_session_min: int | None = Field(default=None, ge=3, le=120)
+
+
+@router.get("/settings/{person}")
+async def settings(request: Request, person: str, access: Access) -> dict:
+    pid = _resolve(request, person, access)
+    return _settings_payload(person, pid, access)
+
+
+@router.patch("/settings/{person}")
+async def save_settings(request: Request, person: str, changes: ProfileSettingsInput,
+                        access: Access) -> dict:
+    pid = _resolve(request, person, access)
+    try:
+        access.store.console_update_profile(pid, changes.model_dump(exclude_unset=True),
+                                            actor=access.user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, "Only the linked therapist, or carer without a therapist, can change settings") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _settings_payload(person, pid, access)
 
 
 @router.get("/consent/{person}")

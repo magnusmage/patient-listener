@@ -9,7 +9,7 @@ remain historical snapshots. Workbook contents are requirements to assess, not c
 to execute. Event dates/prices/rules below are workbook claims, not independently checked
 current contest rules. No remote host or cloud deployment was inspected during this audit.
 
-**Latest update:** 22 October 2026: saved draft creation added in the draft API checkpoint after `1c8603c`.
+**Latest update:** 22 October 2026: draft creation committed as `84577b0`; persistent settings implemented locally after that checkpoint (uncommitted).
 
 ## Where we are
 
@@ -122,7 +122,7 @@ relative to `src/patient_listener/` unless a different prefix is shown.
 | FR-51 | "How's [name] doing?" is answered only with the weekly counts template; no interpretation | Partial | fixed counts/weekly templates; scoped console counts | Connect carer tool to allowed aggregates; deny detailed attempts/health interpretation. |
 | FR-52 | The weekly card (Friday 18:00 local) lists words found without a hint, new words, and the fixed safety line | Partial | Friday check/card template in nightly helper | Correct new-word window, timezone, stored card, Friday 18:00 scheduling/delivery and retries. |
 | FR-60 | Console grid shows per word per day: ✓ / M / S / W / –, with no suggestions or predictions | Partial | linked-therapist grid endpoint and UI | Patient-local days, timestamp policy, swapped hint-order semantics; UTC currently used. |
-| FR-61 | Therapist (or carer, only when no therapist is linked) can change needs, waits (within the PauseConfig ranges), hint order and session cap. The person can always lengthen or switch off any wait or the session cap in P7 without a PIN; the PIN guards only needs, hint order, shortening limits and consent | Missing integration | settings GET, PauseConfig, browser controls only | Write API/storage, role/PIN policy, patient lengthening/no-limit rights; apply in session. |
+| FR-61 | Therapist (or carer, only when no therapist is linked) can change needs, waits (within the PauseConfig ranges), hint order and session cap. The person can always lengthen or switch off any wait or the session cap in P7 without a PIN; the PIN guards only needs, hint order, shortening limits and consent | Partial - backend and console saved | PATCH settings, linked-role checks, safe patient WS extensions, session/plan integration and restart tests | P7 frontend wiring, helper PIN unlock and real acceptance remain. |
 | FR-62 | Export (CSV) and delete-everything; deletion completes within 24 h and is confirmed | Missing integration | store export_csv/delete_all helpers only | Authenticated complete export/delete endpoints, complete cleanup/confirmation; UI deletion is local only. |
 | FR-63 | The word list accepts "my phrases" (kind = phrase, ≤ 60 characters), approved like words, practised in M2/M3, and exported as plain text in T6. No audio is recorded or stored | Partial | phrase schema <=60 characters; shared matching | Real phrase draft/approval, mode-specific practice and complete plain-text export. |
 | FR-80 | Stroke-sign phrases stop the session and show the safety card with the local number (999 UK, 911 US, 1122 Pakistan); the linked carer gets a message within 10 s | Partial | terminal partial/final safety detection, localized number helper | Propagate person region (AppSession defaults UK); deliver linked-carer message <10 s. |
@@ -272,3 +272,17 @@ no model credits used. File-backed restart and judge isolation tested. Live demo
 acceptance is pending. See DRAFT_CREATION_API.md. This step does not implement cue
 editing, saved profiles/settings, consent or export/deletion. Next: persisted profile
 settings with role checks and the patient's right to lengthen/remove limits.
+
+## 22 October: persistent profile settings
+
+Implemented saved needs, waits, hint order and duration, with linked therapist/carer
+permission rules. New sessions and nightly plans use stored profiles. Existing console
+controls now PATCH the backend; failures do not create fake local settings. Patient
+WebSocket extensions persist and can only lengthen/remove waits/caps, never change
+protected needs/order. Getting words out's no-sound rule and Saving energy's turn cap
+remain enforced. Saved overrides survive file-DB restart and are removed on deletion.
+
+Verification: 271 backend tests, 17 browser tests, seven local synthetic release gates;
+no paid model calls. See PROFILE_SETTINGS_API.md. Settings work is uncommitted. P7
+frontend/PIN unlock remains open; patient protected changes are denied in the meantime.
+Next: consent persistence, then nightly generation and Hermes tools, as previously agreed.

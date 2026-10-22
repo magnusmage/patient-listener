@@ -151,21 +151,71 @@
   }
 
   // T5 profile & hint settings
+  const NEED_OPTIONS = [
+    ['finding_words', 'Finding the word'], ['words_out', 'Getting words started'],
+    ['being_heard', 'Being loud enough'], ['being_clear', 'Being clear'], ['saving_energy', 'Getting tired']
+  ];
   function t5() {
     const s = DATA.settings[S.person] || { needs: [], hintOrder: 'meaning-first', hintWait: 7, sessionMin: 20 };
-    const pill = (label, active, fn) => h('button', { 'aria-pressed': String(active), onclick: fn }, label);
+    const keys = s.needKeys || NEED_OPTIONS.filter(([,label]) => s.needs.includes(label)).map(([key]) => key);
+    const locked = s.canEdit === false || S.busy;
+    const pill = (label, active, change, disabled = false) => h('button', {
+      'aria-pressed': String(active), disabled: locked || disabled ? '' : null,
+      onclick: () => saveProfile(change)
+    }, label);
+    const row = (label, name, current, choices) => h('div', {class:'pl-setting'},
+      h('div', {class:'pl-setting__row'}, h('span', {}, label),
+        h('span', {class:'pl-pill'}, [...new Set([...choices,current])].filter(n => n !== undefined).map(n =>
+          pill(n === null ? 'Never' : String(n), n === current, {[name]:n},
+            keys.includes('words_out') && ['backchannel_s','offer_hint_s'].includes(name) && n !== null)))));
     const wrap = h('div', {});
-    wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Profile & hints — ' + name(S.person)));
-    wrap.append(
-      h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, 'Hint order'),
-        h('span', { class: 'pl-pill' }, pill('Meaning first', s.hintOrder === 'meaning-first', () => { s.hintOrder = 'meaning-first'; render(); }), pill('Sound first', s.hintOrder === 'sound-first', () => { s.hintOrder = 'sound-first'; render(); })))),
-      h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, 'Offer a hint after'),
-        h('span', { class: 'pl-pill' }, [4, 7, 10, 15].map(n => pill(n + 's', s.hintWait === n, () => { s.hintWait = n; render(); })), pill('Never', s.hintWait === null, () => { s.hintWait = null; render(); })))),
-      h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, 'Session length'),
-        h('span', { class: 'pl-pill' }, [10, 20].map(n => pill(n + ' min', s.sessionMin === n, () => { s.sessionMin = n; render(); })), pill('No limit', s.sessionMin === null, () => { s.sessionMin = null; render(); })))),
-      h('p', { class: 'pl-muted' }, 'Every wait is kept inside the safe range. The person can always make a wait longer or switch it off themselves.'),
-    );
+    wrap.append(h('h2', {class:'pl-topbar__title'}, 'Profile & hints — ' + name(S.person)));
+    if (s.canEdit === false) wrap.append(h('p', {class:'pl-muted'}, 'Only the linked therapist can change these settings.'));
+    wrap.append(h('div', {class:'pl-setting'}, h('span', {}, "What's hard when talking"),
+      h('div', {class:'pl-pill'}, NEED_OPTIONS.map(([key,label]) => {
+        const active = keys.includes(key);
+        return pill(label, active, {needs: active ? keys.filter(n => n !== key) : [...keys,key]}, active && keys.length === 1);
+      }))),
+      h('div', {class:'pl-setting'}, h('div', {class:'pl-setting__row'}, h('span', {}, 'Hint order'),
+        h('span', {class:'pl-pill'},
+          pill('Meaning first', s.hintOrder === 'meaning-first', {hint_order:['meaning','sound','word']}),
+          pill('Sound first', s.hintOrder === 'sound-first', {hint_order:['sound','meaning','word']})))),
+      row('Listening sound after (seconds)', 'backchannel_s', s.backchannelWait, [4,6,10,null]),
+      row('Offer a hint after (seconds)', 'offer_hint_s', s.hintWait, [4,7,9,10,15,null]),
+      row('End turn after (seconds)', 'max_wait_s', s.maxWait, [8,12,20,30,60,120,null]),
+      row('Session length (minutes)', 'max_session_min', s.sessionMin, [5,10,15,20,30,null]),
+      h('p', {class:'pl-muted'}, 'Saved settings apply to new sessions. The person can always make a wait longer or switch it off.'));
     return wrap;
+  }
+
+  async function saveProfile(changes) {
+    if (S.busy || DATA.settings[S.person]?.canEdit === false) return;
+    const person = S.person, credential = accessToken;
+    S.busy = true; S.error = ''; render();
+    try {
+      if (API != null) {
+        const result = await api(`settings/${encodeURIComponent(person)}`, {
+          method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(changes)
+        });
+        if (S.signedIn && accessToken === credential) {
+          DATA.settings[person] = result;
+          const entry = DATA.caseload.find(p => p.id === person);
+          if (entry) entry.needs = result.needs;
+        }
+      } else {
+        const s = DATA.settings[person] ||= {needs:[]};
+        if ('needs' in changes) {
+          s.needKeys = changes.needs;
+          s.needs = NEED_OPTIONS.filter(([key]) => changes.needs.includes(key)).map(([,label]) => label);
+          if (changes.needs.includes('words_out')) s.backchannelWait = s.hintWait = null;
+        }
+        if ('hint_order' in changes) s.hintOrder = changes.hint_order[0] + '-first';
+        for (const [field,key] of [['backchannel_s','backchannelWait'],['offer_hint_s','hintWait'],['max_wait_s','maxWait'],['max_session_min','sessionMin']]) {
+          if (field in changes) s[key] = changes[field];
+        }
+      }
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; render(); }
   }
 
   // T6 consent & export
@@ -296,7 +346,7 @@
         ]);
         DATA.words[p.id] = w.words;
         DATA.grid[p.id] = { days: g.days, rows: g.rows };
-        DATA.settings[p.id] = { needs: s.needs, hintOrder: s.hintOrder, hintWait: s.hintWait, sessionMin: s.sessionMin };
+        DATA.settings[p.id] = s;
         DATA.consent[p.id] = { tellCarerLowMood: c.tellCarerLowMood, dataSharing: c.dataSharing };
       }));
   }

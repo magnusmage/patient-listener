@@ -28,12 +28,13 @@ function find(element, predicate) {
   }
 }
 
-function runtime({ role = 'therapist', denied = false, rejectApproval = false, rejectCreation = false, search = '' } = {}) {
+function runtime({ role = 'therapist', denied = false, rejectApproval = false, rejectCreation = false, rejectSettings = false, search = '' } = {}) {
   const root = new Element('main');
   const theme = new Element('button');
   const calls = [];
   const word = { id: 'draft1', text: 'Rex', kind: 'person', cue: 'puppy', first: 'R', status: 'draft', by: 'carer' };
   const drafts = [];
+  const profile = { needs: [], needKeys: ['finding_words'], hintOrder: 'meaning-first', hintWait: 7, backchannelWait: 4, maxWait: 20, sessionMin: 20, canEdit: role === 'therapist' };
   const context = vm.createContext({
     window: {}, location: { protocol: 'http:', search }, URLSearchParams,
     setTimeout: () => 0,
@@ -47,9 +48,9 @@ function runtime({ role = 'therapist', denied = false, rejectApproval = false, r
       calls.push({ url, options });
       let status = 200;
       let body;
-      if (denied || (rejectApproval && url.endsWith('/approve')) || (rejectCreation && options.method === 'POST' && url.endsWith('/words/linked'))) {
+      if (denied || (rejectApproval && url.endsWith('/approve')) || (rejectCreation && options.method === 'POST' && url.endsWith('/words/linked')) || (rejectSettings && options.method === 'PATCH')) {
         status = denied ? 401 : 403;
-        body = { detail: denied ? 'Invalid or expired access token' : rejectCreation ? 'Could not save draft' : 'Therapist approval required' };
+        body = { detail: denied ? 'Invalid or expired access token' : rejectCreation ? 'Could not save draft' : rejectSettings ? 'Therapist settings required' : 'Therapist approval required' };
       } else if (url.endsWith('/me')) {
         body = { id: 'sam', name: 'Sam', role, demo: false };
       } else if (url.endsWith('/caseload')) {
@@ -66,7 +67,15 @@ function runtime({ role = 'therapist', denied = false, rejectApproval = false, r
       } else if (url.includes('/grid/')) {
         body = { days: [], rows: [] };
       } else if (url.includes('/settings/')) {
-        body = { needs: [], hintOrder: 'meaning-first', hintWait: 7, sessionMin: 20 };
+        if (options.method === 'PATCH') {
+          const changes = JSON.parse(options.body);
+          if ('needs' in changes) profile.needKeys = changes.needs;
+          if ('hint_order' in changes) profile.hintOrder = changes.hint_order[0] + '-first';
+          for (const [key, field] of [['offer_hint_s','hintWait'],['backchannel_s','backchannelWait'],['max_wait_s','maxWait'],['max_session_min','sessionMin']]) {
+            if (key in changes) profile[field] = changes[key];
+          }
+        }
+        body = structuredClone(profile);
       } else if (url.includes('/consent/')) {
         body = { tellCarerLowMood: false, dataSharing: false };
       } else body = { ok: true };
@@ -181,4 +190,37 @@ test('offline phrase additions remain drafts and make no network requests', asyn
   await app.context.addPhrase();
   assert.equal(app.run('DATA.words.margaret.at(-1).status'),'draft');
   assert.equal(app.calls.length,0);
+});
+
+
+test('profile controls PATCH authenticated settings and reload uses server values', async () => {
+  const app=runtime();
+  await app.signIn();
+  app.run("S.tab='T5'; render()");
+  await app.context.saveProfile({hint_order:['sound','meaning','word'],offer_hint_s:9,max_session_min:30});
+  const request=app.calls.find(c => c.options.method === 'PATCH');
+  assert.equal(request.url,'/api/console/settings/linked');
+  assert.equal(request.options.headers.Authorization,'Bearer individual-test-token');
+  assert.equal(app.run('DATA.settings.linked.hintOrder'),'sound-first');
+  assert.equal(app.run('DATA.settings.linked.hintWait'),9);
+  app.run('clearData()');
+  await app.context.hydrate();
+  assert.equal(app.run('DATA.settings.linked.sessionMin'),30);
+});
+
+test('rejected profile save preserves server settings and shows the error', async () => {
+  const app=runtime({rejectSettings:true});
+  await app.signIn();
+  await app.context.saveProfile({offer_hint_s:9});
+  assert.equal(app.run('DATA.settings.linked.hintWait'),7);
+  assert.ok(app.root.textContent.includes('Therapist settings required'));
+});
+
+test('linked carer profile is read-only when a therapist owns settings', async () => {
+  const app=runtime({role:'carer'});
+  await app.signIn();
+  app.run("S.tab='T5'; render()");
+  assert.ok(app.root.textContent.includes('Only the linked therapist'));
+  await app.context.saveProfile({max_session_min:30});
+  assert.equal(app.calls.filter(c => c.options.method === 'PATCH').length,0);
 });
