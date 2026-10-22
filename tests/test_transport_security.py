@@ -72,8 +72,14 @@ class HttpsTransportTests(unittest.TestCase):
     def setUp(self):
         settings = Settings(
             environment="production", session_token_secret="unit-secret", require_https=True,
-            trust_proxy_headers=True,
+            trust_proxy_headers=True, database_url="postgresql://transport-test-unused",
         )
+        from unittest.mock import patch
+        from patient_listener.store.sqlite_store import SqliteStore
+        database = patch('patient_listener.app.deps.open_store',
+                         side_effect=lambda *a, **kw: SqliteStore(check_same_thread=False))
+        database.start()
+        self.addCleanup(database.stop)
         self.client = TestClient(create_app(settings))
         self.client.__enter__()
 
@@ -93,7 +99,8 @@ class HttpsTransportTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_session_token_endpoint_does_not_trust_spoofable_headers_by_default(self):
-        settings = Settings(environment="production", session_token_secret="unit-secret", require_https=True)
+        settings = Settings(environment="production", session_token_secret="unit-secret", require_https=True,
+                            database_url="postgresql://transport-test-unused")
         with TestClient(create_app(settings)) as client:
             response = client.get(
                 "/api/session",

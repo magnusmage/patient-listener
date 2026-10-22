@@ -26,7 +26,7 @@ voice = [
 llm = ["openai[aiohttp]==3.3.0", "tenacity==9.2.1", "instructor==1.17.0"]
 matching = ["rapidfuzz~=3.14", "jellyfish~=1.2", "nltk~=3.10", "epitran~=1.35"]
 schedule = ["fsrs~=6.3"]
-api = ["fastapi~=0.142", "uvicorn[standard]~=0.54", "pydantic~=2.13", "pydantic-settings~=2.15"]
+api = ["fastapi~=0.142", "uvicorn[standard]~=0.54", "pydantic~=2.13", "pydantic-settings~=2.15", "python-dotenv>=1,<2"]
 store = ["sqlalchemy[asyncio]~=2.1", "asyncpg~=0.31", "aiosqlite~=0.22", "alembic~=1.20"]
 jobs = ["saq~=0.26"]
 trace = ["structlog~=26.1", "arize-phoenix-otel~=0.17", "opentelemetry-sdk~=1.45",

@@ -149,8 +149,8 @@ Open `http://localhost:8000/console.html?mode=judge` and choose **Enter judge de
 uses a separate in-memory store containing only the three seeded personas. Demo credentials
 cannot read or modify the main database, even when word IDs match. `?mode=judge` alone does
 not enable server access. `?mock=1` (or opening the HTML from disk) uses browser-only sample
-data and grants no API access. Environment values must be exported by the shell/launcher;
-the application does not automatically load `.env`.
+data and grants no API access. The application loads `.env` from the working directory;
+exported environment values take precedence. `PL_ENV_FILE` selects another explicit file.
 
 To run the console access regression checks:
 
@@ -315,3 +315,5 @@ monitor any condition, is not for children under 18, and is not for use in an em
 
 MIT (see `LICENSE`). Third-party models and tools are used under their own licenses — see
 `NOTICE`.
+
+For the PostgreSQL migration and deployment sequence, see [Database deployment](docs/DATABASE_DEPLOYMENT.md).

@@ -20,7 +20,7 @@ from typing import Optional
 from ..schemas import Attempt, HintLines, PauseConfig, Plan, PlanItem, WordEntry
 from ..types import HintLevel, Need, Outcome, WordStatus
 
-__all__ = ["SqliteStore"]
+__all__ = ["SqlStore", "SqliteStore"]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
@@ -84,22 +84,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class SqliteStore:
-    def __init__(self, path: str = ":memory:", check_same_thread: bool = True,
-                 *, ai_enabled: bool | None = None) -> None:
-        # ``check_same_thread=False`` lets the app server reuse one connection across the
-        # event-loop / threadpool boundary (access stays serialized there). Defaults to True so
-        # existing callers and tests are unaffected.
-        self._db = sqlite3.connect(path, check_same_thread=check_same_thread)
-        self._db.row_factory = sqlite3.Row
-        self._db.executescript("PRAGMA journal_mode=WAL;" + _SCHEMA)
-        self._db.commit()
+class SqlStore:
+    """Shared row-scoped operations over a transactional connection adapter."""
+
+    def _initialize_ai(self, ai_enabled: bool | None) -> None:
         if self._get_kv("ai_enabled") is None:
             if ai_enabled is None:
                 from ..config import Settings
                 ai_enabled = Settings().ai_enabled
             # Never overwrite an operator's persisted switch on restart.
-            self._db.execute("INSERT OR IGNORE INTO kv(k,v) VALUES ('ai_enabled',?)",
+            self._db.execute("INSERT INTO kv(k,v) VALUES ('ai_enabled',?) ON CONFLICT(k) DO NOTHING",
                              ("1" if ai_enabled else "0",))
             self._db.commit()
 
@@ -110,7 +104,7 @@ class SqliteStore:
         return row["v"] if row else None
 
     def _set_kv(self, k: str, v: str) -> None:
-        self._db.execute("INSERT OR REPLACE INTO kv(k, v) VALUES (?, ?)", (k, v))
+        self._db.execute("INSERT INTO kv(k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
         self._db.commit()
 
     def is_ai_enabled(self) -> bool:
@@ -153,7 +147,7 @@ class SqliteStore:
         ).fetchone():
             raise KeyError("unknown user or person")
         self._db.execute(
-            "INSERT OR IGNORE INTO console_links(user_id, person_id) VALUES (?,?)",
+            "INSERT INTO console_links(user_id, person_id) VALUES (?,?) ON CONFLICT(user_id,person_id) DO NOTHING",
             (user_id, person_id),
         )
         self._db.commit()
@@ -240,7 +234,7 @@ class SqliteStore:
 
     def add_person(self, person_id: str, first_name: str, needs: frozenset[Need]) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO people(id, first_name, needs, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO people(id, first_name, needs, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET first_name=excluded.first_name, needs=excluded.needs",
             (person_id, first_name, json.dumps(sorted(n.value for n in needs)), _now()),
         )
         self._db.commit()
@@ -336,10 +330,14 @@ class SqliteStore:
 
     def _write_word(self, w: WordEntry) -> None:
         self._db.execute(
-            """INSERT OR REPLACE INTO words
+            """INSERT INTO words
                (id, person_id, text, kind, meaning_cue, first_sound, photo_id, status,
                 added_by, approved_by, hints)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                person_id=excluded.person_id, text=excluded.text, kind=excluded.kind,
+                meaning_cue=excluded.meaning_cue, first_sound=excluded.first_sound,
+                photo_id=excluded.photo_id, status=excluded.status, added_by=excluded.added_by,
+                approved_by=excluded.approved_by, hints=excluded.hints""",
             (
                 w.id,
                 w.person_id,
@@ -452,7 +450,7 @@ class SqliteStore:
 
     def save_plan(self, plan: Plan) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO plans(person_id, mode, items, pause) VALUES (?,?,?,?)",
+            "INSERT INTO plans(person_id, mode, items, pause) VALUES (?,?,?,?) ON CONFLICT(person_id) DO UPDATE SET mode=excluded.mode,items=excluded.items,pause=excluded.pause",
             (
                 plan.person_id,
                 plan.mode,
@@ -525,7 +523,7 @@ class SqliteStore:
             self._db.executemany(
                 "INSERT INTO hint_audio(person_id,word_id,level,text,model,voice,pcm) VALUES (?,?,?,?,?,?,?)",
                 [(plan.person_id, *clip) for clip in clips])
-            self._db.execute("INSERT OR REPLACE INTO plans(person_id,mode,items,pause) VALUES (?,?,?,?)",
+            self._db.execute("INSERT INTO plans(person_id,mode,items,pause) VALUES (?,?,?,?) ON CONFLICT(person_id) DO UPDATE SET mode=excluded.mode,items=excluded.items,pause=excluded.pause",
                 (plan.person_id, plan.mode, json.dumps([asdict(i) for i in plan.items]),
                  json.dumps(_pause_to_dict(plan.pause))))
             self._db.execute("INSERT INTO audit(actor,action,detail,at) VALUES (?,?,?,?)",
@@ -563,7 +561,7 @@ class SqliteStore:
 
     def set_card(self, person_id: str, word_id: str, card_json: str) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO cards(person_id, word_id, card) VALUES (?,?,?)",
+            "INSERT INTO cards(person_id, word_id, card) VALUES (?,?,?) ON CONFLICT(person_id,word_id) DO UPDATE SET card=excluded.card",
             (person_id, word_id, card_json),
         )
         self._db.commit()
@@ -578,7 +576,7 @@ class SqliteStore:
 
     def set_consent(self, person_id: str, kind: str, granted: bool) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO consents(person_id, kind, granted, at) VALUES (?,?,?,?)",
+            "INSERT INTO consents(person_id, kind, granted, at) VALUES (?,?,?,?) ON CONFLICT(person_id,kind) DO UPDATE SET granted=excluded.granted,at=excluded.at",
             (person_id, kind, 1 if granted else 0, _now()),
         )
         self._db.commit()
@@ -600,7 +598,7 @@ class SqliteStore:
         with self._db:
             for kind, granted in changes.items():
                 self._db.execute(
-                    "INSERT OR REPLACE INTO consents(person_id,kind,granted,at) VALUES (?,?,?,?)",
+                    "INSERT INTO consents(person_id,kind,granted,at) VALUES (?,?,?,?) ON CONFLICT(person_id,kind) DO UPDATE SET granted=excluded.granted,at=excluded.at",
                     (person_id, kind, int(granted), at))
                 self._db.execute(
                     "INSERT INTO consent_events(person_id,kind,granted,actor,at) VALUES (?,?,?,?,?)",
@@ -707,3 +705,14 @@ def _pause_from_needs(needs: frozenset[Need]) -> PauseConfig:
     from ..voice.merge import merge
 
     return merge(needs)
+
+
+class SqliteStore(SqlStore):
+    """Dependency-free development adapter; PostgreSQL uses the same operations."""
+    def __init__(self, path: str = ":memory:", check_same_thread: bool = True,
+                 *, ai_enabled: bool | None = None) -> None:
+        self._db = sqlite3.connect(path, check_same_thread=check_same_thread)
+        self._db.row_factory = sqlite3.Row
+        self._db.executescript("PRAGMA journal_mode=WAL;" + _SCHEMA)
+        self._db.commit()
+        self._initialize_ai(ai_enabled)

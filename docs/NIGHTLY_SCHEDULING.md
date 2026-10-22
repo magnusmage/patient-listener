@@ -37,7 +37,8 @@ as an operator capability. Revoking a console sign-in token alone does not revok
 this separately configured worker; disable NIGHTLY_ENABLED or remove the link.
 
 The console access CLI remains the way to provision/link helpers. Scheduling
-requires an explicit file PL_DB_PATH, not an in-memory database. Set the intended
+requires persistent storage: a file PL_DB_PATH/SQLite DATABASE_URL or a migrated
+PostgreSQL DATABASE_URL. See DATABASE_DEPLOYMENT.md for the cloud migration. Set the intended
 IANA timezone explicitly. Linux generally supplies timezone data; Windows needs
 Python tzdata for IANA zones. UTC works without that dependency. .env.example is
 reference only: this version reads exported variables, not .env automatically.

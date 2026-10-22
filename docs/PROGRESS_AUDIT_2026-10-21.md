@@ -397,3 +397,34 @@ Actual sandbox runtime/version installation, OpenShell policy/credential injecti
 Telegram routing/delivery, shared AI kill-switch and hard inference spending
 controls, message retention and the ten-second chat-to-link gate remain open.
 The prepared profile limits are conservative, not a guarantee on model spending.
+
+
+## 22 October: PostgreSQL adapter, migrations and deployment configuration
+
+Committed the prior agent/plugin foundation as 93d882c. Added PostgreSQL selection
+through SQLAlchemy asyncio/asyncpg and an explicit packaged Alembic revision 0001,
+while preserving the SQLite development path. Shared store operations now use
+portable conflict handling. PostgreSQL write transactions use a shared advisory
+lock for nightly budget checks and agent request deduplication. Failed statements
+release their write transactions. TLS URL/certificate options are translated for
+asyncpg; missing migrations or connectivity stop startup without SQLite fallback.
+
+Added automatic working-directory .env loading with injected-value precedence,
+explicit PL_ENV_FILE selection, no secret interpolation and redacted settings
+representations. Admin token/agent/switch tools can use DATABASE_URL without --db.
+Added an opt-in SQLite snapshot importer that refuses populated targets, preserves
+rows and audio, resets sequences, rolls back failed imports and excludes active
+console/agent credentials. It has not been run on the user's database.
+
+Verification: 347 default backend regression tests passed; eight opt-in tests
+passed separately against a disposable local PostgreSQL 16 container (355 backend
+checks total). The 14 console browser checks and seven synthetic release gates
+passed. No model credits or cloud resources used. Local PostgreSQL verification
+is not a completed Nebius Managed PostgreSQL deployment or measured live latency.
+
+See DATABASE_DEPLOYMENT.md for installation, migration/import order and limitations.
+The synchronous facade still blocks its calling thread; shared write locking is
+conservative. Device/session admission is still process-local, so deployment stays
+single-worker until shared admission is implemented. Managed TLS/restart testing,
+endpoint separation, Serverless Job/saq scheduling, actual Hermes/OpenShell and
+Telegram integration plus the remaining workbook acceptance gates remain open.

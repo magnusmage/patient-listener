@@ -1,13 +1,12 @@
 """Trusted local provisioning of one agent/helper/person credential; never a public API."""
 import argparse
-from pathlib import Path
-from ..store.sqlite_store import SqliteStore
+from ..store.factory import open_admin_store
 from ..store.agent_store import AgentStore
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--db',required=True,help='Existing app database file')
+    parser.add_argument('--db',help='Existing SQLite file; omit for PostgreSQL DATABASE_URL')
     sub=parser.add_subparsers(dest='command',required=True)
     grant=sub.add_parser('grant')
     grant.add_argument('--service',default='hermes')
@@ -17,8 +16,8 @@ def main(argv=None):
     revoke=sub.add_parser('revoke')
     revoke.add_argument('--service',default='hermes')
     args=parser.parse_args(argv)
-    if not Path(args.db).is_file(): parser.error('Use the existing server database file')
-    store=SqliteStore(args.db)
+    try: store=open_admin_store(args.db)
+    except ValueError as exc: parser.error(str(exc))
     try:
         agent=AgentStore(store)
         if args.command == 'revoke':

@@ -72,8 +72,10 @@ def _redact_websocket_scope(scope: dict) -> None:
 async def _lifespan(app: FastAPI):
     app.state.voice_runtime = None
     app.state.nightly_task = None
-    db_path = os.environ.get("PL_DB_PATH", ":memory:")
-    if app.state.settings.nightly_enabled and db_path == ":memory:":
+    db_path = os.environ.get("PL_DB_PATH")
+    if (app.state.settings.nightly_enabled and not app.state.settings.database_url.startswith(
+            ('postgresql://','postgresql+asyncpg://','postgres://'))
+            and (db_path == ':memory:' or (db_path is None and app.state.settings.database_url.endswith('/:memory:')))):
         raise ValueError("Nightly scheduling requires a persistent PL_DB_PATH")
     app.state.pl = build_state(db_path=db_path,
                                settings=app.state.settings)
@@ -105,7 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # redaction here so neither startup path writes session credentials to access logs.
     install_access_log_redaction()
     app = FastAPI(title="Patient Listener", lifespan=_lifespan)
-    app.state.settings = settings or default_settings
+    app.state.settings = settings or Settings()
     app.state.settings.assert_safe_startup()
     app.include_router(console_router)
     app.include_router(agent_router)

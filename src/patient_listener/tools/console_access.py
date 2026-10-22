@@ -5,14 +5,13 @@ Tokens expire, are stored only as hashes, and should be supplied privately to th
 """
 
 import argparse
-from pathlib import Path
 
-from ..store.sqlite_store import SqliteStore
+from ..store.factory import open_admin_store
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, help="Existing app SQLite database")
+    parser.add_argument("--db", help="Existing SQLite file; omit for PostgreSQL DATABASE_URL")
     sub = parser.add_subparsers(dest="command", required=True)
     grant = sub.add_parser("grant", help="Set identity, add patient links, replace existing tokens")
     grant.add_argument("--user", required=True)
@@ -23,9 +22,8 @@ def main() -> None:
     revoke = sub.add_parser("revoke", help="Revoke every access token for an identity")
     revoke.add_argument("--user", required=True)
     args = parser.parse_args()
-    if not Path(args.db).is_file():
-        parser.error("database does not exist; start the app with PL_DB_PATH first")
-    store = SqliteStore(args.db)
+    try: store = open_admin_store(args.db)
+    except ValueError as exc: parser.error(str(exc))
     try:
         if args.command == "revoke":
             store.revoke_console_tokens(args.user)
