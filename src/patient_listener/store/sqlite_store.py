@@ -65,6 +65,15 @@ CREATE TABLE IF NOT EXISTS console_users (
 CREATE TABLE IF NOT EXISTS console_links (
     user_id TEXT NOT NULL, person_id TEXT NOT NULL, PRIMARY KEY (user_id, person_id)
 );
+CREATE TABLE IF NOT EXISTS agent_credentials (
+    token_hash TEXT PRIMARY KEY, service_id TEXT NOT NULL, helper_id TEXT NOT NULL,
+    person_id TEXT NOT NULL, expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_tool_requests (
+    service_id TEXT NOT NULL, helper_id TEXT NOT NULL, person_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL, payload_hash TEXT NOT NULL, word_id TEXT NOT NULL,
+    PRIMARY KEY (service_id, helper_id, person_id, request_hash)
+);
 CREATE TABLE IF NOT EXISTS console_tokens (
     token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL
 );
@@ -631,7 +640,7 @@ class SqliteStore:
     def delete_all(self, person_id: str) -> dict:
         """Delete everything for one person; completes immediately here (<= 24 h in prod)."""
         counts = {}
-        for table in ("words", "attempts", "cards", "plans", "consents", "hint_audio", "nightly_runs", "person_settings", "console_links", "people"):
+        for table in ("words", "attempts", "cards", "plans", "consents", "hint_audio", "nightly_runs", "agent_credentials", "agent_tool_requests", "person_settings", "console_links", "people"):
             col = "id" if table == "people" else "person_id"
             cur = self._db.execute(f"DELETE FROM {table} WHERE {col}=?", (person_id,))
             counts[table] = cur.rowcount

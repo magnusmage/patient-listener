@@ -28,6 +28,7 @@ from .access_log import install_access_log_redaction, redact_request_target
 from .voice_connection import VoiceConnection
 from ..llm.factory import build_llm
 from .console_api import router as console_router
+from .agent_api import router as agent_router
 from .deps import build_state
 from .session import AppSession
 from .voice_runtime import VoiceRuntime
@@ -107,11 +108,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings or default_settings
     app.state.settings.assert_safe_startup()
     app.include_router(console_router)
+    app.include_router(agent_router)
 
     @app.middleware("http")
     async def private_api_no_cache(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith("/api/console/") or request.url.path == "/api/session":
+        if request.url.path.startswith(("/api/console/", "/api/agent/")) or request.url.path == "/api/session":
             response.headers["Cache-Control"] = "no-store"
         return response
 

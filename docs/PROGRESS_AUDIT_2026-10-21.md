@@ -349,3 +349,51 @@ clocks and GPU runtime only; no paid calls. Real GPU scheduling acceptance pendi
 This is development scheduling while the API server is on, not a deployed Nebius
 Serverless Job. The cloud CPU/GPU split, render service, Postgres/SAQ, full FSRS,
 weekly delivery, Hermes/OpenShell and production acceptance remain open.
+
+
+## 22 October: restricted agent tool foundation
+
+User-reported GPU evidence now includes successful one-word Super preparation
+(model_attempts=1, model_hints=1, rendered_clips=3) and a successful automatic
+nightly run for demo-margaret on local date 2026-10-22.
+
+Added only add_word_draft and progress_summary agent endpoints, separate from
+human console authentication. Credentials are hash-stored, expiring and bound to
+one service/helper/person combination; role and links are checked at the store
+boundary. Draft creation is idempotent and atomic, never approves, and returns a
+console path without sign-in credentials. Progress uses distinct seven-day word
+counts in a fixed template, with no detailed attempt reads or model interpretation.
+Added trusted local grant/revoke and a no-model CLI test client. See
+[AGENT_TOOLS_API.md](AGENT_TOOLS_API.md).
+
+Validation: 332 backend tests, 20 browser tests and seven local synthetic release
+gates pass. No model calls or messages sent. Remote tool smoke test pending.
+
+This is the API foundation only. Hermes runtime registration, verified Telegram
+sender/link routing, OpenShell credential injection/network restrictions, delivery,
+rotation and the ten-second acceptance gate remain open. No fallback plain bot
+has replaced Hermes. Broader consent/retention and deployment requirements remain.
+
+
+## 22 October: portable Hermes plugin prepared for Nebius
+
+User confirmed the two restricted tools on the GPU development server. Prepared
+a standalone Hermes register(ctx) plugin exposing only add_word_draft and
+progress_summary, fixed HTTP paths, no model-controlled identity/URL/credentials,
+redirect rejection, bounded/sanitised responses and a fixed summary check. Added
+a dedicated profile example, assistant instructions and a no-model checker.
+
+341 backend tests and seven synthetic release gates pass, including nine new
+plugin contract/client/integration checks. No real Hermes inference, messages or
+cloud resources were started. Hermes itself is not installed/tested here.
+
+User clarified Hermes/OpenShell/NemoClaw are not installed on the local GPU and
+no Nebius CPU agent server has been created. Deployment targets Nebius, not the
+local GPU. See HERMES_NEBIUS_HANDOFF.md. The local-only backend still needs secure
+reachability before a remote agent can use it; copying a separate SQLite database
+would not create shared application state.
+
+Actual sandbox runtime/version installation, OpenShell policy/credential injection,
+Telegram routing/delivery, shared AI kill-switch and hard inference spending
+controls, message retention and the ten-second chat-to-link gate remain open.
+The prepared profile limits are conservative, not a guarantee on model spending.

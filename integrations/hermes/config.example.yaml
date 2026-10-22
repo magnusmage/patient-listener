@@ -1,0 +1,44 @@
+# Dedicated Patient Listener Hermes profile. Review on the installed Hermes version.
+# Do not start live model tests until the OpenShell boundary and backend reachability are ready.
+providers:
+  patient-listener-nebius:
+    api: https://api.tokenfactory.nebius.com/v1/
+    key_env: PATIENT_LISTENER_MODEL_KEY
+    transport: chat_completions
+    discover_models: false
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+      max_tokens: 256
+model:
+  provider: custom:patient-listener-nebius
+  default: nvidia/Nemotron-3_5-Lightning
+  context_length: 8192
+  supports_vision: false
+agent:
+  max_turns: 2
+  api_max_retries: 0
+  auto_recovery_cycles: 0
+  tool_use_enforcement: true
+  disabled_toolsets:
+    - terminal
+    - file
+    - browser
+    - web
+    - search
+    - code_execution
+    - delegation
+    - cronjob
+    - memory
+    - session_search
+    - messaging
+    - skills
+compression:
+  enabled: false
+plugins:
+  enabled:
+    - patient-listener
+platform_toolsets:
+  cli:
+    - patient_listener
+# No Telegram credentials or channel are enabled by this example.
