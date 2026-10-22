@@ -1,17 +1,18 @@
 """Therapist console REST API, backed by the real :class:`SqliteStore`.
 
 Replaces the mock ``DATA`` object in ``web/console.html`` with live, row-scoped reads of the
-store the patient app writes to. Everything is read-only except the one write the console is
-allowed to make: approving a word draft (FR-40 - a therapist, never the agent).
+store the patient app writes to. Linked carers/therapists create drafts; approval follows
+the linked-role policy (FR-40). Agents cannot use console credentials to approve.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..types import Need, Outcome
 from .console_auth import ConsoleAccess, console_access
@@ -115,6 +116,34 @@ async def words(request: Request, person: str, access: Access) -> dict:
     store = access.store
     pid = _resolve(request, person, access)
     return {"person": person, "words": [_word_dict(w) for w in store.all_words(pid)]}
+
+
+class WordDraftInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    text: str = Field(min_length=1, max_length=60)
+    kind: Literal["person", "place", "food", "object", "activity", "phrase"]
+    meaning_cue: str = Field(default="", max_length=90)
+    first_sound: str = Field(default="", max_length=4)
+
+    @field_validator("text", "meaning_cue", "first_sound")
+    @classmethod
+    def single_line(cls, value: str) -> str:
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("Use a single line without control characters")
+        return value
+
+
+@router.post("/words/{person}", status_code=201)
+async def create_word_draft(request: Request, person: str, draft: WordDraftInput,
+                            access: Access) -> dict:
+    pid = _resolve(request, person, access)
+    try:
+        word = access.store.console_add_word_draft(pid, actor=access.user_id,
+                                                  **draft.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(403, "Draft creation is not permitted") from exc
+    return {"ok": True, "word": _word_dict(word)}
 
 
 @router.get("/grid/{person}")

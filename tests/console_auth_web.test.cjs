@@ -28,11 +28,12 @@ function find(element, predicate) {
   }
 }
 
-function runtime({ role = 'therapist', denied = false, rejectApproval = false, search = '' } = {}) {
+function runtime({ role = 'therapist', denied = false, rejectApproval = false, rejectCreation = false, search = '' } = {}) {
   const root = new Element('main');
   const theme = new Element('button');
   const calls = [];
   const word = { id: 'draft1', text: 'Rex', kind: 'person', cue: 'puppy', first: 'R', status: 'draft', by: 'carer' };
+  const drafts = [];
   const context = vm.createContext({
     window: {}, location: { protocol: 'http:', search }, URLSearchParams,
     setTimeout: () => 0,
@@ -46,15 +47,22 @@ function runtime({ role = 'therapist', denied = false, rejectApproval = false, s
       calls.push({ url, options });
       let status = 200;
       let body;
-      if (denied || (rejectApproval && url.endsWith('/approve'))) {
+      if (denied || (rejectApproval && url.endsWith('/approve')) || (rejectCreation && options.method === 'POST' && url.endsWith('/words/linked'))) {
         status = denied ? 401 : 403;
-        body = { detail: denied ? 'Invalid or expired access token' : 'Therapist approval required' };
+        body = { detail: denied ? 'Invalid or expired access token' : rejectCreation ? 'Could not save draft' : 'Therapist approval required' };
       } else if (url.endsWith('/me')) {
         body = { id: 'sam', name: 'Sam', role, demo: false };
       } else if (url.endsWith('/caseload')) {
         body = { therapist: { name: 'Sam' }, caseload: [{ id: 'linked', name: 'Linked person', needs: [], canApprove: role === 'therapist' }] };
+      } else if (url.endsWith('/words/linked') && options.method === 'POST') {
+        status = 201;
+        const input = JSON.parse(options.body);
+        const saved = { id: 'saved-' + drafts.length, text: input.text, kind: input.kind,
+                        cue: '', first: input.text[0].toUpperCase(), status: 'draft',
+                        by: role === 'therapist' ? 'slt' : 'carer' };
+        drafts.push(saved); body = {ok: true, word: structuredClone(saved)};
       } else if (url.includes('/words/')) {
-        body = { words: [structuredClone(word)] };
+        body = { words: [structuredClone(word), ...structuredClone(drafts)] };
       } else if (url.includes('/grid/')) {
         body = { days: [], rows: [] };
       } else if (url.includes('/settings/')) {
@@ -62,7 +70,7 @@ function runtime({ role = 'therapist', denied = false, rejectApproval = false, s
       } else if (url.includes('/consent/')) {
         body = { tellCarerLowMood: false, dataSharing: false };
       } else body = { ok: true };
-      return { ok: status === 200, status, json: async () => body };
+      return { ok: status >= 200 && status < 300, status, json: async () => body };
     },
   });
   const html = fs.readFileSync(path.join(__dirname, '..', 'web', 'console.html'), 'utf8');
@@ -129,4 +137,48 @@ test('explicit mock mode remains sample-only and never calls authenticated endpo
   assert.ok(app.root.textContent.includes('Demo data only'));
   assert.ok(app.root.textContent.includes('Margaret'));
   assert.equal(app.calls.length, 0);
+});
+
+
+test('Add phrase posts an authenticated draft and reload reads the saved result', async () => {
+  const app = runtime({role:'carer'});
+  await app.signIn();
+  app.run("S.tab='T3'; render()");
+  app.context.document.getElementById('phrase').value = 'Can you open the window?';
+  const first = app.context.addPhrase();
+  const second = app.context.addPhrase(); // double-click does not submit twice
+  await Promise.all([first, second]);
+  const writes = app.calls.filter(c => c.url.endsWith('/words/linked') && c.options.method === 'POST');
+  assert.equal(writes.length,1);
+  assert.equal(writes[0].options.headers.Authorization,'Bearer individual-test-token');
+  assert.equal(writes[0].options.headers['Content-Type'],'application/json');
+  assert.deepEqual(JSON.parse(writes[0].options.body),{text:'Can you open the window?',kind:'phrase'});
+  assert.equal(app.run('DATA.words.linked.at(-1).status'),'draft');
+  assert.equal(app.run('DATA.words.linked.at(-1).by'),'carer');
+  assert.equal(app.run('S.phraseDraft'),'');
+  app.run('clearData()');
+  await app.context.hydrate();
+  assert.equal(app.run('DATA.words.linked.at(-1).text'),'Can you open the window?');
+});
+
+test('failed draft save keeps input and never creates a browser-only live word', async () => {
+  const app = runtime({rejectCreation:true});
+  await app.signIn();
+  app.run("S.tab='T3'; render()");
+  app.context.document.getElementById('phrase').value = 'Please help';
+  await app.context.addPhrase();
+  assert.equal(app.run('DATA.words.linked.length'),1);
+  assert.equal(app.run('S.phraseDraft'),'Please help');
+  assert.equal(app.run('S.busy'),false);
+  assert.ok(app.root.textContent.includes('Could not save draft'));
+});
+
+test('offline phrase additions remain drafts and make no network requests', async () => {
+  const app = runtime({search:'?mock=1'});
+  await app.context.signIn(false);
+  app.run("S.tab='T3'; render()");
+  app.context.document.getElementById('phrase').value = 'Please help';
+  await app.context.addPhrase();
+  assert.equal(app.run('DATA.words.margaret.at(-1).status'),'draft');
+  assert.equal(app.calls.length,0);
 });

@@ -193,6 +193,21 @@ class SqliteStore:
             raise KeyError(word_id)
         return self.approve_word(word_id, by=actor)
 
+    def console_add_word_draft(
+        self, person_id: str, *, actor: str, text: str, kind: str,
+        meaning_cue: str = "", first_sound: str = "",
+    ) -> WordEntry:
+        """Derive author role and IDs at the trusted boundary; creation never approves."""
+        user = self._db.execute("SELECT role FROM console_users WHERE id=?", (actor,)).fetchone()
+        if (not user or user["role"] not in {"carer", "therapist"}
+                or person_id not in self.linked_people(actor)):
+            raise PermissionError("patient access denied")
+        return self.add_word_draft(
+            "w-" + secrets.token_hex(16), person_id, text, kind,
+            meaning_cue=meaning_cue, first_sound=first_sound,
+            added_by="slt" if user["role"] == "therapist" else "carer", actor=actor,
+        )
+
     def add_person(self, person_id: str, first_name: str, needs: frozenset[Need]) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO people(id, first_name, needs, created_at) VALUES (?, ?, ?, ?)",
@@ -223,6 +238,7 @@ class SqliteStore:
         meaning_cue: str = "",
         first_sound: str = "",
         added_by: str = "carer",
+        *, actor: Optional[str] = None,
     ) -> WordEntry:
         """New words start as drafts (FR-40). The agent calls this; it cannot approve."""
         entry = WordEntry(
@@ -236,7 +252,7 @@ class SqliteStore:
             added_by=added_by,
         )
         self._write_word(entry)
-        self._audit(added_by, "add_word_draft", f"{person_id}:{text}")
+        self._audit(actor or added_by, "add_word_draft", f"{person_id}:{word_id}")
         return entry
 
     def _write_word(self, w: WordEntry) -> None:

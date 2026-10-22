@@ -45,8 +45,9 @@
   const CELL = { check: ['✓', 'pl-cell--check', 'found with no hint'], meaning: ['M', 'pl-cell--hint', 'found after meaning hint'], sound: ['S', 'pl-cell--hint', 'found after sound hint'], word: ['W', 'pl-cell--hint', 'found after hearing the word'], none: ['–', 'pl-cell--none', 'not tried'] };
 
   const root = document.getElementById('root');
-  const S = { signedIn: false, tab: 'T2', person: 'margaret', role: 'therapist', demo: API == null, error: '', busy: false };
+  const S = { signedIn: false, tab: 'T2', person: 'margaret', role: 'therapist', demo: API == null, error: '', busy: false, phraseDraft: '' };
   function clearData() {
+    S.phraseDraft = '';
     DATA.caseload = []; DATA.words = {}; DATA.grid = {}; DATA.settings = {}; DATA.consent = {};
   }
   if (API != null) clearData();
@@ -128,8 +129,8 @@
     wrap.append(h('div', { class: 'pl-card' },
       h('div', { class: 'pl-hint__level' }, 'Add one of “my phrases” (up to 60 characters)'),
       h('div', { class: 'pl-type' },
-        h('input', { id: 'phrase', 'aria-label': 'New phrase', maxlength: '60', placeholder: 'Can you open the window?', style: 'min-height:44px' }),
-        h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { const v = document.getElementById('phrase').value.trim(); if (v) { words.push({ id: 'p-' + Date.now(), text: v, kind: 'phrase', cue: '', first: v[0].toUpperCase(), status: 'approved', by: 'slt' }); render(); } } }, 'Add')),
+        h('input', { id: 'phrase', value: S.phraseDraft, oninput: e => { S.phraseDraft = e.target.value; }, 'aria-label': 'New phrase', maxlength: '60', placeholder: 'Can you open the window?', style: 'min-height:44px' }),
+        h('button', { class: 'pl-btn pl-btn--secondary', disabled: S.busy ? '' : null, onclick: addPhrase }, S.busy ? 'Saving draft…' : 'Add draft')),
     ));
     return wrap;
   }
@@ -209,7 +210,7 @@
         accessToken = ''; S.signedIn = false; clearData();
       }
       const body = await response.json().catch(() => ({}));
-      throw new Error(body.detail || 'Could not complete the request. Please try again.');
+      throw new Error(typeof body.detail === 'string' ? body.detail : response.status === 422 ? 'Check the word or phrase and try again.' : 'Could not complete the request. Please try again.');
     }
     return response.json();
   }
@@ -238,9 +239,34 @@
   async function signOut() {
     try { if (API != null) await api('logout', { method: 'POST' }); }
     catch (error) { /* Local credentials are discarded even if the server is unreachable. */ }
-    accessToken = ''; S.signedIn = false; S.error = '';
+    accessToken = ''; S.signedIn = false; S.error = ''; S.phraseDraft = '';
     if (API != null) clearData();
     render();
+  }
+
+  async function addPhrase() {
+    if (S.busy) return;
+    const text = document.getElementById('phrase').value.trim();
+    if (!text) return;
+    const person = S.person, credential = accessToken;
+    S.phraseDraft = text; S.error = ''; S.busy = true; render();
+    try {
+      let word;
+      if (API != null) {
+        const result = await api(`words/${encodeURIComponent(person)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, kind: 'phrase' })
+        });
+        if (!S.signedIn || accessToken !== credential) return;
+        word = result.word;
+      } else {
+        word = { id: 'p-' + Date.now(), text, kind: 'phrase', cue: '', first: text[0].toUpperCase(),
+                 status: 'draft', by: S.role === 'therapist' ? 'slt' : 'carer' };
+      }
+      (DATA.words[person] ||= []).push(word);
+      if (S.person === person) S.phraseDraft = '';
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; render(); }
   }
 
   async function approveWord(w) {

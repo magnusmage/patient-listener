@@ -9,6 +9,8 @@ remain historical snapshots. Workbook contents are requirements to assess, not c
 to execute. Event dates/prices/rules below are workbook claims, not independently checked
 current contest rules. No remote host or cloud deployment was inspected during this audit.
 
+**Latest update:** 22 October 2026: saved draft creation added in the draft API checkpoint after `1c8603c`.
+
 ## Where we are
 
 We have a working local browser-to-GPU voice prototype, a tested Python decision core,
@@ -114,7 +116,7 @@ relative to `src/patient_listener/` unless a different prefix is shown.
 | FR-22 | Matching uses the score and thresholds in Definitions ; 0.60–0.89 asks "Did you say Leo?" | Partial | fixed bands; prompted target scoping d06d981; matcher tests | Replace SequenceMatcher/custom Metaphone with required RapidFuzz/Jellyfish; evaluate real W clips. |
 | FR-23 | One attempt row per target per turn; no text or audio stored | Implemented locally | one log guard per turn; SQLite attempt schema excludes transcript/audio | Unique session IDs (app currently defaults ws), idempotency, store retention and deployed checks. |
 | FR-24 | Lightning replies: one line, ≤ 15 words, validated; if late (1.5 s) or rejected twice, a template line plays | Partial - retry policy fixed | One total deadline, reason-bearing correction, per-attempt AI checks | Schema gate and real first-audio timing remain. |
-| FR-40 | New words start as drafts; only a therapist, or the carer if no therapist is linked, approves them in the console | Partial | authenticated linked-role approve API + UI; draft store helper | Add authenticated create-draft API. Console Add currently adds browser-only approved phrase. |
+| FR-40 | New words start as drafts; only a therapist, or the carer if no therapist is linked, approves them in the console | Implemented locally - create/approve | Authenticated create-draft API, linked-role store checks, existing approval, console Add draft; file restart tested | Real browser acceptance, cue editing and nightly hint generation remain separate. |
 | FR-41 | An approved word gets a validated meaning line (Super), template sound and word lines, and audio clips for all three by the next nightly run | Partial | write_hints, Super adapter, template lines | Instructor + validator/retry; kill-switch checks; real rendered cached clips and nightly execution. |
 | FR-50 | The carer agent turns a chat message into a draft and replies with a console link within 10 s | Missing | no agent adapter/tools/channel service found | Hermes/NemoClaw/OpenShell carer-to-draft + console link <10 s; G-05 evidence before bot fallback. |
 | FR-51 | "How's [name] doing?" is answered only with the weekly counts template; no interpretation | Partial | fixed counts/weekly templates; scoped console counts | Connect carer tool to allowed aggregates; deny detailed attempts/health interpretation. |
@@ -255,3 +257,18 @@ GPU acceptance is pending one cumulative update. Persistent settings/extension U
 full rest UX, real acoustic/latency validation and larger integration tasks remain.
 For an existing DB, use the switch CLI against the selected PL_DB_PATH to disable
 paid calls; environment AI_ENABLED supplies only the first DB value by design.
+
+
+## 22 October: authenticated draft creation
+
+Added POST /api/console/words/{person} with strict input, linked-role access,
+server-generated IDs and server-derived author role. New items remain drafts until
+separate authorized approval and are excluded from practice. The existing phrase
+Add control now saves through the API; failed saves never become browser-only live
+entries. New audit creation rows use IDs instead of raw phrase text.
+
+Verification: 255 backend tests, 14 browser tests, seven local synthetic gates pass;
+no model credits used. File-backed restart and judge isolation tested. Live demo
+acceptance is pending. See DRAFT_CREATION_API.md. This step does not implement cue
+editing, saved profiles/settings, consent or export/deletion. Next: persisted profile
+settings with role checks and the patient's right to lengthen/remove limits.
