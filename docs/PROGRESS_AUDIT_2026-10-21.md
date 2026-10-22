@@ -302,3 +302,24 @@ unfinished. On-demand nightly generation and Hermes are still next planned work.
 
 Validation: 276 backend tests and 20 browser tests pass; all seven local
 synthetic release gates are green. No paid model calls were made.
+
+
+## 22 October: on-demand plan preparation and live consumption
+
+Committed model logging/grounding as `efd1e44` before implementing this step.
+Added authenticated POST /api/console/plans/{person}/generate and the local
+`patient_listener.tools.generate_plan` command. Default one approved word, no
+paid calls; explicit use_ai permits at most one Super attempt per selected word.
+Saved plan subset/order/prompts now drive new sessions. Three Magpie hint clips
+per word are cached in the database and reused with normal playback ACKs. Atomic
+publication preserves the prior plan on failure. Existing demo word rows/hints
+survive restart seeding. See [ON_DEMAND_PLANS.md](ON_DEMAND_PLANS.md).
+
+Validation: full suite of 299 backend tests and 20 browser tests passed, followed
+by the expanded 16-test generation suite (two additional cases, 301 backend tests
+in total). Seven local synthetic release gates pass. Fake models only; no paid
+requests or GPU rendering was run here. Real GPU acceptance is still pending.
+
+This is manual generation only. Scheduled nightly deployment, separate render
+service, full FSRS, Instructor, audio normalisation/voice acceptance, weekly
+delivery, Hermes and shared-worker coordination remain open.

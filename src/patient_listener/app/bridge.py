@@ -55,6 +55,7 @@ def action_to_events(action: Action, ctx: EmitContext) -> list[dict]:
         return [
             {
                 "type": "hint",
+                "word_id": action.word.id,
                 "level": int(action.level),
                 "text": step.text,
                 "letter": action.word.first_sound or action.word.text[:1],

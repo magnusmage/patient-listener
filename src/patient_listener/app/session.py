@@ -74,7 +74,11 @@ class AppSession:
         self.first_name = store.person_name(person_id)
         needs = store.person_needs(person_id)
         self.cfg = store.person_pause(person_id)
-        self.words = store.words(person_id)
+        approved = {w.id: w for w in store.words(person_id)}
+        self.plan = store.load_plan(person_id)
+        self.plan_items = {i.word_id: i for i in self.plan.items if i.word_id in approved}
+        ordered_ids = list(dict.fromkeys(i.word_id for i in self.plan.items if i.word_id in approved))
+        self.words = [approved[wid] for wid in ordered_ids] or list(approved.values())[:10]
         self.profile = next((n.value for n in _PROFILE_ORDER if n in needs), "finding_words")
         self.feedback = presenter.feedback_key(self.cfg.feedback)
         self.engine = SessionEngine(
@@ -189,6 +193,9 @@ class AppSession:
             return
         self.current = self.words[self.idx % len(self.words)] if self.words else None
         payload = presenter.prompt_payload(self.current, self.cfg.feedback, self.profile)
+        item = self.plan_items.get(self.current.id) if self.current else None
+        if item is not None:
+            payload["text"] = item.prompt
         acts = await self._feed(("prompt", self.current, payload["topic"], self.now()))
         if self.ended or self.engine.controller.state == State.SAFETY_STOP:
             return

@@ -98,6 +98,14 @@ class VoiceConnection:
         text = spoken_text(event)
         if text:
             self._audio_busy(True)
+            if event['type'] == 'hint':
+                store = getattr(self.session, 'store', None)
+                if store is not None:
+                    pcm = store.hint_audio(self.session.person_id, event['word_id'], event['level'],
+                        text, self.runtime.settings.tts_model, self.runtime.settings.tts_voice)
+                    if pcm is not None:
+                        self.output.put_nowait((text, pcm))
+                        return
             # Sentence-by-sentence synthesis. A bounded queue fails visibly instead of growing forever.
             for sentence in re.split(r'(?<=[.!?])\s+', text):
                 self.output.put_nowait(sentence)
@@ -166,7 +174,8 @@ class VoiceConnection:
         from .nemo_stream import synthesize
         try:
             while not self.closed:
-                text = await self.output.get()
+                queued = await self.output.get()
+                text, cached = queued if isinstance(queued, tuple) else (queued, None)
                 self._set_playback(True)
                 self.session._cancel_ticker()
                 self._drain(self.input)
@@ -175,7 +184,8 @@ class VoiceConnection:
                 self.played.clear()
                 await self.send_json({'type': 'audioStart', 'id': self.sequence,
                                       'sample_rate': 22050, 'encoding': 'pcm_s16le'})
-                pcm = await worker_call(self._invoke, synthesize, self.runtime, text)
+                pcm = cached if cached is not None else await worker_call(
+                    self._invoke, synthesize, self.runtime, text)
                 if self.closed: break
                 await self.socket.send_bytes(pcm)
                 await self.send_json({'type': 'audioEnd', 'id': self.sequence})

@@ -173,3 +173,29 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 texts = [call.args[1] for call in synth.call_args_list]
                 self.assertEqual(texts, ['Old first.', 'Well done today.'])
             finally: await c.close()
+
+
+    async def test_cached_hint_playback_does_not_synthesize_and_waits_for_ack(self):
+        c, events = self.connection()
+        c.runtime.settings.tts_model = 'model'
+        c.runtime.settings.tts_voice = 'voice'
+        c.session.person_id = 'person'
+        from unittest.mock import Mock
+        c.session.store = SimpleNamespace(hint_audio=Mock(return_value=b'\1\0'))
+        with patch('patient_listener.app.nemo_stream.NemoStream', Decoder), patch(
+            'patient_listener.app.nemo_stream.synthesize') as synth:
+            await c.start()
+            try:
+                await c.send({'type':'hint','word_id':'word','level':1,'text':'A family pet.'})
+                self.assertEqual((await events.get())['type'],'hint')
+                start = await asyncio.wait_for(events.get(),1)
+                self.assertEqual(start['type'],'audioStart')
+                self.assertEqual((await events.get())['type'],'audioEnd')
+                c.socket.send_bytes.assert_awaited_once_with(b'\1\0')
+                synth.assert_not_called()
+                self.assertTrue(c.busy)
+                c.acknowledge(start['id'])
+                self.assertEqual((await asyncio.wait_for(events.get(),1))['type'],'audioIdle')
+                c.session.store.hint_audio.assert_called_once_with(
+                    'person','word',1,'A family pet.','model','voice')
+            finally: await c.close()

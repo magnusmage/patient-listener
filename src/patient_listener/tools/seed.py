@@ -19,7 +19,10 @@ def seed_margaret(store: SqliteStore) -> str:
         ("w-kettle", "kettle", "object", "you boil water in it", "K"),
         ("w-whitby", "Whitby", "place", "the seaside town you visited", "W"),
     ]
+    existing = {w.id for w in store.all_words(pid)}
     for wid, text, kind, cue, fs in words:
+        if wid in existing:
+            continue
         store.add_word_draft(wid, pid, text, kind, meaning_cue=cue, first_sound=fs, added_by="slt")
         store.approve_word(wid, by="slt")
     return pid

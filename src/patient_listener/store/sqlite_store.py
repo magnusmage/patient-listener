@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS attempts (
 CREATE TABLE IF NOT EXISTS cards (person_id TEXT, word_id TEXT, card TEXT,
     PRIMARY KEY (person_id, word_id));
 CREATE TABLE IF NOT EXISTS plans (person_id TEXT PRIMARY KEY, mode TEXT, items TEXT, pause TEXT);
+CREATE TABLE IF NOT EXISTS hint_audio (
+    person_id TEXT NOT NULL, word_id TEXT NOT NULL, level INTEGER NOT NULL,
+    text TEXT NOT NULL, model TEXT NOT NULL, voice TEXT NOT NULL, pcm BLOB NOT NULL,
+    PRIMARY KEY (person_id, word_id, level)
+);
 CREATE TABLE IF NOT EXISTS person_settings (person_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS consents (person_id TEXT, kind TEXT, granted INTEGER, at TEXT,
     PRIMARY KEY (person_id, kind));
@@ -437,6 +442,40 @@ class SqliteStore:
         )
         self._db.commit()
 
+    def publish_generated_plan(self, plan: Plan, originals: list[WordEntry],
+                               hints: dict[str, HintLines], clips: list[tuple], *, actor: str) -> None:
+        """Publish a complete generation atomically; no partial plan on model/TTS failure."""
+        if not self.can_manage_profile(plan.person_id, actor):
+            raise PermissionError("Plan generation requires the linked decision-maker")
+        current = {w.id: w for w in self.words(plan.person_id)}
+        def signature(w):
+            return (w.text, w.kind, w.meaning_cue, w.first_sound)
+        if any(w.id not in current or signature(w) != signature(current[w.id]) for w in originals):
+            raise ValueError("Approved words changed; generate the plan again")
+        with self._db:
+            for word in originals:
+                self._db.execute("UPDATE words SET hints=? WHERE id=? AND person_id=?",
+                    (json.dumps(asdict(hints[word.id])), word.id, plan.person_id))
+                self._db.execute("DELETE FROM hint_audio WHERE person_id=? AND word_id=?",
+                                 (plan.person_id, word.id))
+            self._db.executemany(
+                "INSERT INTO hint_audio(person_id,word_id,level,text,model,voice,pcm) VALUES (?,?,?,?,?,?,?)",
+                [(plan.person_id, *clip) for clip in clips])
+            self._db.execute("INSERT OR REPLACE INTO plans(person_id,mode,items,pause) VALUES (?,?,?,?)",
+                (plan.person_id, plan.mode, json.dumps([asdict(i) for i in plan.items]),
+                 json.dumps(_pause_to_dict(plan.pause))))
+            self._db.execute("INSERT INTO audit(actor,action,detail,at) VALUES (?,?,?,?)",
+                             (actor, "generate_plan", plan.person_id, _now()))
+
+    def hint_audio(self, person_id: str, word_id: str, level: int, text: str,
+                   model: str, voice: str) -> bytes | None:
+        row = self._db.execute(
+            "SELECT a.pcm FROM hint_audio a JOIN words w ON w.id=a.word_id "
+            "AND w.person_id=a.person_id WHERE a.person_id=? AND a.word_id=? AND a.level=? "
+            "AND a.text=? AND a.model=? AND a.voice=? AND w.status='approved'",
+            (person_id, word_id, level, text, model, voice)).fetchone()
+        return bytes(row["pcm"]) if row else None
+
     def load_plan(self, person_id: str) -> Plan:
         row = self._db.execute(
             "SELECT * FROM plans WHERE person_id=?", (person_id,)
@@ -445,7 +484,7 @@ class SqliteStore:
         if row is None:
             # Default plan: every approved word, naming prompt (plan_missing fallback).
             items = tuple(
-                PlanItem(word_id=w.id, reason="due", prompt="Who is this?")
+                PlanItem(word_id=w.id, reason="due", prompt="Who is this?" if w.kind == "person" else "What's this?")
                 for w in self.words(person_id)[:10]
             )
             return Plan(person_id=person_id, mode="review", items=items, pause=pause)
@@ -537,7 +576,7 @@ class SqliteStore:
     def delete_all(self, person_id: str) -> dict:
         """Delete everything for one person; completes immediately here (<= 24 h in prod)."""
         counts = {}
-        for table in ("words", "attempts", "cards", "plans", "consents", "person_settings", "console_links", "people"):
+        for table in ("words", "attempts", "cards", "plans", "consents", "hint_audio", "person_settings", "console_links", "people"):
             col = "id" if table == "people" else "person_id"
             cur = self._db.execute(f"DELETE FROM {table} WHERE {col}=?", (person_id,))
             counts[table] = cur.rowcount
