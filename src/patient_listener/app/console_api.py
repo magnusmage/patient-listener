@@ -298,55 +298,20 @@ class PlanGenerationInput(BaseModel):
 @router.post("/plans/{person}/generate")
 async def generate_person_plan(request: Request, person: str, options: PlanGenerationInput,
                                access: Access) -> dict:
-    import importlib.util
-    from ..llm.factory import build_llm
-    from ..plan_generation import generate_plan, PlanConflict
-    from .nemo_stream import synthesize
-    from .voice_connection import worker_call
-    state = _state(request)
+    from .plan_jobs import run_generation
     pid = _resolve(request, person, access)
-    if not access.store.can_manage_profile(pid, access.user_id):
-        raise HTTPException(403, "Only the linked therapist, or carer without a therapist, can generate plans")
-    if access.demo and (options.use_ai or options.render_audio):
-        raise HTTPException(403, "Judge demo plan generation supports templates and text only")
-    runtime = request.app.state.voice_runtime
-    if options.render_audio and runtime is None:
-        raise HTTPException(503, "Voice models are not loaded; use render_audio=false for a text plan")
-    if options.use_ai and (not access.store.is_ai_enabled() or not state.settings.nebius_api_key.strip()
-                          or importlib.util.find_spec('openai') is None):
-        raise HTTPException(409, "Enable AI and configure the API key and SDK before requesting model hints")
-    # Same admission controls as live practice. A generation cannot compete with voice
-    # or mutate the person's hints under an active session on this worker.
-    person_key = ('demo-plan:' if access.demo else '') + pid
-    if not await state.sessions.claim(person_key):
-        raise HTTPException(409, "This person has an active session or plan generation")
-    gpu_claimed = False
-    try:
-        if options.render_audio:
-            if not await state.sessions.claim('__gpu_voice__'):
-                raise HTTPException(409, "GPU is busy; stop the voice session before generating audio")
-            gpu_claimed = True
-        async def render(text):
-            def locked_render():
-                with runtime.gpu_lock:
-                    return synthesize(runtime, text)
-            return await worker_call(locked_render)
-        return await generate_plan(access.store, pid, actor=access.user_id,
-            llm=build_llm(state.settings, access.store), max_words=options.max_words,
-            use_ai=options.use_ai, render=render if options.render_audio else None,
-            tts_model=state.settings.tts_model, voice=state.settings.tts_voice)
-    except HTTPException:
-        raise
-    except PermissionError as exc:
-        raise HTTPException(403, "Plan generation is no longer permitted") from exc
-    except PlanConflict as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    except Exception as exc:
-        # Never include model payloads, keys or text in an error response.
-        raise HTTPException(503, "Plan generation failed; the previous plan was kept") from exc
-    finally:
-        if gpu_claimed:
-            await state.sessions.release('__gpu_voice__')
-        await state.sessions.release(person_key)
+    return await run_generation(request.app, access, pid, options)
+
+
+@router.get("/nightly/{person}")
+async def nightly_status(request: Request, person: str, access: Access) -> dict:
+    pid = _resolve(request, person, access)
+    cfg = request.app.state.settings
+    return {"enabled": cfg.nightly_enabled, "time": cfg.nightly_time,
+            "timezone": cfg.nightly_timezone, "max_words": cfg.nightly_max_words,
+            "use_ai": cfg.nightly_use_ai, "saved_ai_enabled": access.store.is_ai_enabled(),
+            "render_audio": cfg.nightly_render_audio,
+            "scheduled_for_person": pid in {request.app.state.pl.people.get(p, p) for p in cfg.nightly_people},
+            "actor_authorized": access.store.can_manage_profile(pid, cfg.nightly_actor_id),
+            "daily_model_limit": cfg.nightly_max_model_calls,
+            "runs": access.store.nightly_runs(pid)}

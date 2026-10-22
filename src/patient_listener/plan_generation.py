@@ -32,11 +32,13 @@ def select_words(store, person_id: str, limit: int):
 async def generate_plan(store, person_id: str, *, actor: str, llm, max_words: int = 1,
                         use_ai: bool = False,
                         render: Callable[[str], Awaitable[bytes]] | None = None,
-                        tts_model: str = '', voice: str = '') -> dict:
+                        tts_model: str = '', voice: str = '', max_model_calls: int | None = None) -> dict:
     if not store.can_manage_profile(person_id, actor):
         raise PermissionError('Plan generation requires the linked decision-maker')
     if type(max_words) is not int or not 1 <= max_words <= 10:
         raise ValueError('max_words must be 1..10')
+    if max_model_calls is not None and (type(max_model_calls) is not int or max_model_calls < 0):
+        raise ValueError('max_model_calls must be a nonnegative integer')
     words, due = select_words(store, person_id, max_words)
     if not words:
         raise ValueError('Approve at least one word before generating a word plan')
@@ -44,7 +46,7 @@ async def generate_plan(store, person_id: str, *, actor: str, llm, max_words: in
     calls = model_hints = 0
     for word in words:
         meaning = None
-        if use_ai and store.is_ai_enabled():
+        if use_ai and store.is_ai_enabled() and (max_model_calls is None or calls < max_model_calls):
             calls += 1  # one attempt per word; no retries
             try:
                 candidate = await asyncio.wait_for(llm.plan(PlanFacts(

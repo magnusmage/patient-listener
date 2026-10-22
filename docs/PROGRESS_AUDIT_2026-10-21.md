@@ -323,3 +323,29 @@ requests or GPU rendering was run here. Real GPU acceptance is still pending.
 This is manual generation only. Scheduled nightly deployment, separate render
 service, full FSRS, Instructor, audio normalisation/voice acceptance, weekly
 delivery, Hermes and shared-worker coordination remain open.
+
+
+## 22 October: development nightly scheduling
+
+Added an opt-in in-process worker that runs bounded plan preparation at a configured
+local time (02:00 default) and catches up today's run after a late startup. It
+shares manual generation admission/render/publication logic, waits while voice
+is busy, rechecks the configured helper's current authority and preserves the
+previous plan on failure. Scheduling requires a file database.
+
+A durable date/person ledger prevents automatic replay after completion, failure
+or interruption. A transactionally reserved daily Super budget is shared across
+configured people and survives restarts; default one, automatic AI disabled.
+Budget exhaustion still permits template plans. The helper token is not stored
+or refreshed: the operator config explicitly authorizes a provisioned helper ID,
+with role/link checks at generation and publication. The status API/CLI remains
+authenticated and person-scoped. See [NIGHTLY_SCHEDULING.md](NIGHTLY_SCHEDULING.md).
+
+Validation: full 318-backend-test suite and 20 browser tests passed; the expanded
+18-test scheduler suite then passed including one additional zero/exhausted-budget
+case (319 backend tests total). Seven local synthetic gates green. Fake models,
+clocks and GPU runtime only; no paid calls. Real GPU scheduling acceptance pending.
+
+This is development scheduling while the API server is on, not a deployed Nebius
+Serverless Job. The cloud CPU/GPU split, render service, Postgres/SAQ, full FSRS,
+weekly delivery, Hermes/OpenShell and production acceptance remain open.

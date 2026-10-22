@@ -70,7 +70,11 @@ def _redact_websocket_scope(scope: dict) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     app.state.voice_runtime = None
-    app.state.pl = build_state(db_path=os.environ.get("PL_DB_PATH", ":memory:"),
+    app.state.nightly_task = None
+    db_path = os.environ.get("PL_DB_PATH", ":memory:")
+    if app.state.settings.nightly_enabled and db_path == ":memory:":
+        raise ValueError("Nightly scheduling requires a persistent PL_DB_PATH")
+    app.state.pl = build_state(db_path=db_path,
                                settings=app.state.settings)
     try:
         if app.state.settings.voice_enabled:
@@ -79,8 +83,14 @@ async def _lifespan(app: FastAPI):
                 VoiceRuntime.load, app.state.settings
             )
             logging.getLogger(__name__).info("GPU voice models loaded; development streaming enabled")
+        if app.state.settings.nightly_enabled:
+            from .nightly_worker import NightlyWorker
+            app.state.nightly_task = asyncio.create_task(NightlyWorker(app).run())
         yield
     finally:
+        if app.state.nightly_task is not None:
+            app.state.nightly_task.cancel()
+            await asyncio.gather(app.state.nightly_task, return_exceptions=True)
         if app.state.voice_runtime is not None:
             await asyncio.to_thread(app.state.voice_runtime.close)
             app.state.voice_runtime = None

@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS attempts (
 CREATE TABLE IF NOT EXISTS cards (person_id TEXT, word_id TEXT, card TEXT,
     PRIMARY KEY (person_id, word_id));
 CREATE TABLE IF NOT EXISTS plans (person_id TEXT PRIMARY KEY, mode TEXT, items TEXT, pause TEXT);
+CREATE TABLE IF NOT EXISTS nightly_runs (
+    local_day TEXT NOT NULL, person_id TEXT NOT NULL, actor TEXT NOT NULL,
+    status TEXT NOT NULL, reserved_calls INTEGER NOT NULL, started_at TEXT NOT NULL,
+    finished_at TEXT, summary TEXT, PRIMARY KEY (local_day, person_id)
+);
 CREATE TABLE IF NOT EXISTS hint_audio (
     person_id TEXT NOT NULL, word_id TEXT NOT NULL, level INTEGER NOT NULL,
     text TEXT NOT NULL, model TEXT NOT NULL, voice TEXT NOT NULL, pcm BLOB NOT NULL,
@@ -143,6 +148,12 @@ class SqliteStore:
             (user_id, person_id),
         )
         self._db.commit()
+
+    def console_identity(self, user_id: str) -> dict | None:
+        """Trusted server-side identity lookup; not a console sign-in path."""
+        row = self._db.execute("SELECT id,display_name,role FROM console_users WHERE id=?",
+                               (user_id,)).fetchone()
+        return dict(row) if row else None
 
     def issue_console_token(self, user_id: str, ttl_s: int = 28800, *, demo: bool = False) -> str:
         if ttl_s <= 0:
@@ -442,6 +453,50 @@ class SqliteStore:
         )
         self._db.commit()
 
+    def claim_nightly(self, local_day: str, person_id: str, actor: str,
+                      requested_calls: int, daily_limit: int) -> int | None:
+        """Reserve a bounded budget once per person/date, before any model request.
+
+        A running row left by a crash is deliberately not retried automatically.
+        """
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            if self._db.execute("SELECT 1 FROM nightly_runs WHERE local_day=? AND person_id=?",
+                                (local_day, person_id)).fetchone():
+                self._db.rollback()
+                return None
+            total = self._db.execute(
+                "SELECT COALESCE(SUM(reserved_calls),0) FROM nightly_runs WHERE local_day=?",
+                (local_day,)).fetchone()[0]
+            reserved = min(requested_calls, max(0, daily_limit - total))
+            self._db.execute(
+                "INSERT INTO nightly_runs(local_day,person_id,actor,status,reserved_calls,started_at) "
+                "VALUES (?,?,?,'running',?,?)", (local_day, person_id, actor, reserved, _now()))
+            self._db.commit()
+            return reserved
+        except BaseException:
+            self._db.rollback()
+            raise
+
+    def nightly_reserved_calls(self, local_day: str) -> int:
+        return self._db.execute(
+            "SELECT COALESCE(SUM(reserved_calls),0) FROM nightly_runs WHERE local_day=?",
+            (local_day,)).fetchone()[0]
+
+    def finish_nightly(self, local_day: str, person_id: str, status: str, summary: dict) -> None:
+        if status not in {'succeeded', 'failed', 'skipped'}:
+            raise ValueError('Invalid nightly status')
+        self._db.execute("UPDATE nightly_runs SET status=?,summary=?,finished_at=? "
+                         "WHERE local_day=? AND person_id=? AND status='running'",
+                         (status, json.dumps(summary), _now(), local_day, person_id))
+        self._db.commit()
+
+    def nightly_runs(self, person_id: str, limit: int = 7) -> list[dict]:
+        rows = self._db.execute("SELECT * FROM nightly_runs WHERE person_id=? "
+                               "ORDER BY local_day DESC LIMIT ?", (person_id, limit)).fetchall()
+        return [{**dict(row), 'summary': json.loads(row['summary']) if row['summary'] else None}
+                for row in rows]
+
     def publish_generated_plan(self, plan: Plan, originals: list[WordEntry],
                                hints: dict[str, HintLines], clips: list[tuple], *, actor: str) -> None:
         """Publish a complete generation atomically; no partial plan on model/TTS failure."""
@@ -576,7 +631,7 @@ class SqliteStore:
     def delete_all(self, person_id: str) -> dict:
         """Delete everything for one person; completes immediately here (<= 24 h in prod)."""
         counts = {}
-        for table in ("words", "attempts", "cards", "plans", "consents", "hint_audio", "person_settings", "console_links", "people"):
+        for table in ("words", "attempts", "cards", "plans", "consents", "hint_audio", "nightly_runs", "person_settings", "console_links", "people"):
             col = "id" if table == "people" else "person_id"
             cur = self._db.execute(f"DELETE FROM {table} WHERE {col}=?", (person_id,))
             counts[table] = cur.rowcount

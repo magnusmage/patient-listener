@@ -65,6 +65,18 @@ class Settings:
     openshell_min_version: str = os.environ.get("OPENSHELL_MIN_VERSION", "0.0.34")
     telegram_group_policy: str = os.environ.get("TELEGRAM_GROUP_POLICY", "disabled")
 
+    # Development nightly worker: opt in explicitly; paid calls have a daily budget.
+    nightly_enabled: bool = _b("NIGHTLY_ENABLED", False)
+    nightly_actor_id: str = os.environ.get("NIGHTLY_ACTOR_ID", "")
+    nightly_people: tuple[str, ...] = tuple(p.strip() for p in
+        os.environ.get("NIGHTLY_PEOPLE", "margaret").split(",") if p.strip())
+    nightly_time: str = os.environ.get("NIGHTLY_TIME", "02:00")
+    nightly_timezone: str = os.environ.get("NIGHTLY_TIMEZONE", "UTC")
+    nightly_max_words: int = int(os.environ.get("NIGHTLY_MAX_WORDS", "1"))
+    nightly_use_ai: bool = _b("NIGHTLY_USE_AI", False)
+    nightly_max_model_calls: int = int(os.environ.get("NIGHTLY_MAX_MODEL_CALLS", "1"))
+    nightly_render_audio: bool = _b("NIGHTLY_RENDER_AUDIO", True)
+
     # Scheduling / audio.
     fsrs_desired_retention: float = _f("FSRS_DESIRED_RETENTION", 0.85)
     fsrs_maximum_interval: int = int(os.environ.get("FSRS_MAXIMUM_INTERVAL", "60"))
@@ -77,6 +89,18 @@ class Settings:
             raise ValueError("TELEGRAM_GROUP_POLICY must be 'disabled' (NemoClaw #12409)")
         if tuple(int(x) for x in self.openshell_min_version.split(".")) < (0, 0, 34):
             raise ValueError("OPENSHELL_MIN_VERSION must be >= 0.0.34 (CVE-2026-65093)")
+        if self.nightly_enabled:
+            import re
+            from .schedule.timezones import schedule_timezone
+            if not self.nightly_actor_id.strip() or not self.nightly_people:
+                raise ValueError("Nightly scheduling requires an actor ID and people")
+            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", self.nightly_time):
+                raise ValueError("NIGHTLY_TIME must be HH:MM in 24-hour time")
+            schedule_timezone(self.nightly_timezone)  # fail early on an unknown IANA timezone
+            if not 1 <= self.nightly_max_words <= 10 or not 0 <= self.nightly_max_model_calls <= 100:
+                raise ValueError("Nightly limits: words 1..10, model calls 0..100 per local date")
+            if len(set(self.nightly_people)) != len(self.nightly_people):
+                raise ValueError("NIGHTLY_PEOPLE must not contain duplicates")
         if self.environment == "production":
             if not self.session_token_secret:
                 raise ValueError("SESSION_TOKEN_SECRET is required in production")
