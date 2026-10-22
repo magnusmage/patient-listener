@@ -286,3 +286,19 @@ Verification: 271 backend tests, 17 browser tests, seven local synthetic release
 no paid model calls. See PROFILE_SETTINGS_API.md. Settings work is uncommitted. P7
 frontend/PIN unlock remains open; patient protected changes are denied in the meantime.
 Next: consent persistence, then nightly generation and Hermes tools, as previously agreed.
+
+
+## 22 October: consent recording after profile settings commit
+
+Profile settings committed as `649e72d`. Added authenticated consent PATCH,
+strict explicit-person confirmation, independent distress/therapist-sharing and
+practice-data choices, atomic latest state plus append-only consent events, and
+console save/reload/error handling. See [CONSENT_API.md](CONSENT_API.md).
+
+This is recording infrastructure: broad sharing/retention enforcement, P7 consent,
+external alert delivery and account-life-plus-two-year retention remain open.
+Do not mark NFR-06 or complete consent compliance as done. Export/delete UI remains
+unfinished. On-demand nightly generation and Hermes are still next planned work.
+
+Validation: 276 backend tests and 20 browser tests pass; all seven local
+synthetic release gates are green. No paid model calls were made.

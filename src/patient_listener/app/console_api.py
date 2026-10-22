@@ -238,7 +238,41 @@ async def consent(request: Request, person: str, access: Access) -> dict:
         "person": person,
         "tellCarerLowMood": store.has_consent(pid, "tell_carer_low_mood"),
         "dataSharing": store.has_consent(pid, "data_sharing"),
+        "shareWithTherapist": store.has_consent(pid, "share_with_therapist"),
     }
+
+
+class ConsentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    personConfirmed: Literal[True]
+    tellCarerLowMood: bool | None = None
+    dataSharing: bool | None = None
+    shareWithTherapist: bool | None = None
+
+    @field_validator("personConfirmed", mode="before")
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError("Explicit confirmation must be true")
+        return value
+
+
+@router.patch("/consent/{person}")
+async def save_consent(request: Request, person: str, changes: ConsentInput,
+                       access: Access) -> dict:
+    pid = _resolve(request, person, access)
+    keys = {"tellCarerLowMood": "tell_carer_low_mood", "dataSharing": "data_sharing",
+            "shareWithTherapist": "share_with_therapist"}
+    values = changes.model_dump(exclude_unset=True)
+    confirmed = values.pop("personConfirmed")
+    try:
+        access.store.console_update_consent(pid, {keys[k]: v for k, v in values.items()},
+                                            actor=access.user_id, person_confirmed=confirmed)
+    except PermissionError as exc:
+        raise HTTPException(403, "Only a linked helper can record consent") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await consent(request, person, access)
 
 
 @router.post("/words/{person}/{word_id}/approve")

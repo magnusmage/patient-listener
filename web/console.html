@@ -222,16 +222,33 @@
   function t6() {
     const c = DATA.consent[S.person] || { tellCarerLowMood: false, dataSharing: false };
     const toggle = (label, key) => h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, label),
-      h('button', { class: 'pl-btn pl-btn--secondary', 'aria-pressed': String(c[key]), onclick: () => { c[key] = !c[key]; render(); } }, c[key] ? 'On' : 'Off')));
+      h('button', { class: 'pl-btn pl-btn--secondary', 'aria-pressed': String(c[key]), disabled: S.busy, onclick: () => saveConsent(key, !c[key]) }, c[key] ? 'On' : 'Off')));
     const wrap = h('div', {});
     wrap.append(h('h2', { class: 'pl-topbar__title' }, 'Consent & export — ' + name(S.person)),
-      toggle('Tell the carer if low mood is detected', 'tellCarerLowMood'),
+      toggle('Tell the carer if I express distress', 'tellCarerLowMood'),
       toggle('Keep practice data to show progress', 'dataSharing'),
+      toggle('Share practice data with my therapist', 'shareWithTherapist'),
+      h('p', { class: 'pl-muted' }, 'Record the person’s own choices. A helper supports the decision.'),
       h('div', { class: 'pl-btn-row', style: 'margin-top:16px' },
         h('button', { class: 'pl-btn pl-btn--secondary', onclick: exportCsv }, '⬇ Export CSV'),
         h('button', { class: 'pl-btn pl-btn--secondary', style: 'border-color:var(--pl-danger);color:var(--pl-danger)', onclick: deleteAll }, '🗑 Delete everything')),
       h('p', { class: 'pl-muted' }, 'Export includes “my phrases” as plain text. Delete removes all words, photos and attempts within 24 hours.'));
     return wrap;
+  }
+
+  async function saveConsent(key, value) {
+    if (S.busy) return;
+    if (!window.confirm('Has the person explicitly chosen to ' + (value ? 'allow' : 'turn off') + ' this?')) return;
+    const person = S.person;
+    S.busy = true; S.error = ''; render();
+    try {
+      if (API == null) DATA.consent[person] = { ...DATA.consent[person], [key]: value };
+      else DATA.consent[person] = await api(`consent/${encodeURIComponent(person)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value, personConfirmed: true })
+      });
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; render(); }
   }
 
   function exportCsv() {
@@ -347,7 +364,7 @@
         DATA.words[p.id] = w.words;
         DATA.grid[p.id] = { days: g.days, rows: g.rows };
         DATA.settings[p.id] = s;
-        DATA.consent[p.id] = { tellCarerLowMood: c.tellCarerLowMood, dataSharing: c.dataSharing };
+        DATA.consent[p.id] = c;
       }));
   }
 

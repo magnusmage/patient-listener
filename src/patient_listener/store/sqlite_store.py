@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS plans (person_id TEXT PRIMARY KEY, mode TEXT, items T
 CREATE TABLE IF NOT EXISTS person_settings (person_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS consents (person_id TEXT, kind TEXT, granted INTEGER, at TEXT,
     PRIMARY KEY (person_id, kind));
+CREATE TABLE IF NOT EXISTS consent_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id TEXT NOT NULL, kind TEXT NOT NULL,
+    granted INTEGER NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT, action TEXT, detail TEXT, at TEXT
 );
@@ -475,6 +479,31 @@ class SqliteStore:
             (person_id, kind, 1 if granted else 0, _now()),
         )
         self._db.commit()
+
+    def console_update_consent(self, person_id: str, changes: dict, *, actor: str,
+                               person_confirmed: bool) -> None:
+        user = self._db.execute("SELECT role FROM console_users WHERE id=?", (actor,)).fetchone()
+        if (not user or user["role"] not in {"carer", "therapist"}
+                or person_id not in self.linked_people(actor)):
+            raise PermissionError("Only a linked helper can record the person's choices")
+        if person_confirmed is not True:
+            raise ValueError("Confirm these are the person's explicit choices")
+        allowed = {"tell_carer_low_mood", "data_sharing", "share_with_therapist"}
+        if (not changes or set(changes) - allowed
+                or any(type(value) is not bool for value in changes.values())):
+            raise ValueError("Provide one or more valid consent choices")
+        at = _now()
+        # Latest values and append-only evidence must succeed together.
+        with self._db:
+            for kind, granted in changes.items():
+                self._db.execute(
+                    "INSERT OR REPLACE INTO consents(person_id,kind,granted,at) VALUES (?,?,?,?)",
+                    (person_id, kind, int(granted), at))
+                self._db.execute(
+                    "INSERT INTO consent_events(person_id,kind,granted,actor,at) VALUES (?,?,?,?,?)",
+                    (person_id, kind, int(granted), actor, at))
+            self._db.execute("INSERT INTO audit(actor,action,detail,at) VALUES (?,?,?,?)",
+                             (actor, "record_consent", person_id, at))
 
     def has_consent(self, person_id: str, kind: str) -> bool:
         row = self._db.execute(

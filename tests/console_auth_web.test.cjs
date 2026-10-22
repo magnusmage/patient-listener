@@ -28,15 +28,16 @@ function find(element, predicate) {
   }
 }
 
-function runtime({ role = 'therapist', denied = false, rejectApproval = false, rejectCreation = false, rejectSettings = false, search = '' } = {}) {
+function runtime({ role = 'therapist', denied = false, rejectApproval = false, rejectCreation = false, rejectSettings = false, rejectConsent = false, search = '' } = {}) {
   const root = new Element('main');
   const theme = new Element('button');
   const calls = [];
   const word = { id: 'draft1', text: 'Rex', kind: 'person', cue: 'puppy', first: 'R', status: 'draft', by: 'carer' };
   const drafts = [];
+  const consent = { tellCarerLowMood:false, dataSharing:false, shareWithTherapist:false };
   const profile = { needs: [], needKeys: ['finding_words'], hintOrder: 'meaning-first', hintWait: 7, backchannelWait: 4, maxWait: 20, sessionMin: 20, canEdit: role === 'therapist' };
   const context = vm.createContext({
-    window: {}, location: { protocol: 'http:', search }, URLSearchParams,
+    window: { confirm: () => true }, location: { protocol: 'http:', search }, URLSearchParams,
     setTimeout: () => 0,
     document: {
       getElementById: id => id === 'root' ? root : id === 'theme' ? theme : find(root, e => e.attrs.id === id),
@@ -48,7 +49,7 @@ function runtime({ role = 'therapist', denied = false, rejectApproval = false, r
       calls.push({ url, options });
       let status = 200;
       let body;
-      if (denied || (rejectApproval && url.endsWith('/approve')) || (rejectCreation && options.method === 'POST' && url.endsWith('/words/linked')) || (rejectSettings && options.method === 'PATCH')) {
+      if (denied || (rejectApproval && url.endsWith('/approve')) || (rejectCreation && options.method === 'POST' && url.endsWith('/words/linked')) || (rejectSettings && options.method === 'PATCH') || (rejectConsent && url.includes('/consent/') && options.method === 'PATCH')) {
         status = denied ? 401 : 403;
         body = { detail: denied ? 'Invalid or expired access token' : rejectCreation ? 'Could not save draft' : rejectSettings ? 'Therapist settings required' : 'Therapist approval required' };
       } else if (url.endsWith('/me')) {
@@ -77,7 +78,11 @@ function runtime({ role = 'therapist', denied = false, rejectApproval = false, r
         }
         body = structuredClone(profile);
       } else if (url.includes('/consent/')) {
-        body = { tellCarerLowMood: false, dataSharing: false };
+        if (options.method === 'PATCH') {
+          const {personConfirmed, ...choices} = JSON.parse(options.body);
+          Object.assign(consent, choices);
+        }
+        body = structuredClone(consent);
       } else body = { ok: true };
       return { ok: status >= 200 && status < 300, status, json: async () => body };
     },
@@ -223,4 +228,32 @@ test('linked carer profile is read-only when a therapist owns settings', async (
   assert.ok(app.root.textContent.includes('Only the linked therapist'));
   await app.context.saveProfile({max_session_min:30});
   assert.equal(app.calls.filter(c => c.options.method === 'PATCH').length,0);
+});
+
+
+test('consent choices save authenticated and survive reload; withdrawal saves false', async () => {
+  const app=runtime(); await app.signIn();
+  await app.context.saveConsent('tellCarerLowMood',true);
+  const request=app.calls.find(c => c.url.includes('/consent/') && c.options.method === 'PATCH');
+  assert.equal(request.options.headers.Authorization,'Bearer individual-test-token');
+  assert.deepEqual(JSON.parse(request.options.body),{tellCarerLowMood:true,personConfirmed:true});
+  app.run('clearData()'); await app.context.hydrate();
+  assert.equal(app.run('DATA.consent.linked.tellCarerLowMood'),true);
+  await app.context.saveConsent('tellCarerLowMood',false);
+  assert.equal(app.run('DATA.consent.linked.tellCarerLowMood'),false);
+});
+
+test('consent rejection leaves saved state unchanged', async () => {
+  const app=runtime({rejectConsent:true}); await app.signIn();
+  await app.context.saveConsent('dataSharing',true);
+  assert.equal(app.run('DATA.consent.linked.dataSharing'),false);
+  assert.equal(app.run('S.busy'),false);
+  assert.ok(app.run('S.error').length > 0);
+});
+
+test('consent confirmation cancellation makes no write', async () => {
+  const app=runtime(); await app.signIn();
+  app.context.window.confirm=()=>false;
+  await app.context.saveConsent('dataSharing',true);
+  assert.equal(app.calls.filter(c=>c.options.method === 'PATCH').length,0);
 });
