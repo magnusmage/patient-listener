@@ -7,6 +7,8 @@ the linked-role policy (FR-40). Agents cannot use console credentials to approve
 
 from __future__ import annotations
 
+from ..text.phonetics import PronunciationError, PronunciationUnavailable
+
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
@@ -143,6 +145,10 @@ async def create_word_draft(request: Request, person: str, draft: WordDraftInput
                                                   **draft.model_dump())
     except PermissionError as exc:
         raise HTTPException(403, "Draft creation is not permitted") from exc
+    except PronunciationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except PronunciationUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
     return {"ok": True, "word": _word_dict(word)}
 
 

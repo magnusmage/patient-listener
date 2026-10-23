@@ -495,3 +495,31 @@ Prototype/missing cards are rebuilt from saved attempt history on startup, prese
 original prototype JSON and all attempt rows. Approved due-word selection uses actual FSRS
 retrievability and caps at ten. See FSRS_ACCEPTANCE.md for GPU update and verification.
 This closes the previously recorded FSRS stand-in gap; unrelated outstanding items remain open.
+
+
+## 23 October: matching and pronunciation libraries
+
+FSRS work was committed locally as 64ff78b; nothing was pushed. Replaced spelling and
+phonetic stand-ins with actual RapidFuzz 3.14.6 and Jellyfish 1.2.1 while preserving workbook
+score/thresholds, target restriction and confirmation behavior. Empty phonetic encodings cannot
+count as a sound match. Offline synthetic gates remain green; real audio precision is pending.
+
+New console/trusted/agent drafts derive omitted first sounds through NLTK CMUdict and Epitran
+English fallback. Explicit stored choices remain intact. ARPAbet fits the existing schema;
+short sound cue text avoids reading raw codes. Pronunciation resources stay out of live
+matching. Missing assets produce actionable HTTP 503; unresolved names HTTP 422, with no partial
+draft. Agent idempotent retries reuse the saved word before any pronunciation lookup.
+
+Added pronunciation_check and an environment-local Linux installer for CMUdict and Flite
+lex_lookup pinned to 6c9f20dc915b17f5619340069889db0aa007fcdc. The native process is bounded
+at two seconds without a shell. Shell scripts use LF endings for Windows-to-Linux copying.
+
+Verification: 400 offline backend tests, nine real PostgreSQL integration tests and 24 browser
+checks passed; all seven synthetic gates green. No paid model requests or GPU model execution.
+See MATCHING_PRONUNCIATION_ACCEPTANCE.md. Existing pronunciation choices are not silently
+rewritten; human name/dialect review, actual hint listening and workbook audio precision and
+latency acceptance remain required. Matching changes are not committed at this checkpoint.
+
+The supplied native installer was also verified in an isolated Python 3.12 Linux image.
+An offline run with networking disabled exercised real Epitran/Flite for Farida (F), and
+real CMUdict for knife (N) and chair (CH). GPU installation and listening checks are next.

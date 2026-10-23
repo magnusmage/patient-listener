@@ -75,9 +75,6 @@ class AgentStore:
             # separate admin process immediately before this transaction.
             binding = self.resolve(token)
             helper = self.store.console_identity(binding['helper_id'])
-            entry = WordEntry(id='w-' + secrets.token_hex(16), person_id=binding['person_id'],
-                text=text, kind=kind, meaning_cue=meaning_cue, first_sound=first_sound or text[:1].upper(),
-                added_by='slt' if helper['role'] == 'therapist' else 'carer', status=WordStatus.DRAFT)
             key = (binding['service_id'], binding['helper_id'], binding['person_id'], _hash(request_id))
             old = self.db.execute('SELECT payload_hash,word_id FROM agent_tool_requests WHERE '
                 'service_id=? AND helper_id=? AND person_id=? AND request_hash=?', key).fetchone()
@@ -86,6 +83,10 @@ class AgentStore:
                     raise RequestConflict('Request ID was already used for a different draft')
                 self.db.commit()
                 return {'word_id':old['word_id'], 'draft_created':True, 'replayed':True}
+            from ..text.phonetics import first_sound as derive_first_sound
+            entry = WordEntry(id='w-' + secrets.token_hex(16), person_id=binding['person_id'],
+                text=text, kind=kind, meaning_cue=meaning_cue, first_sound=first_sound or derive_first_sound(text),
+                added_by='slt' if helper['role'] == 'therapist' else 'carer', status=WordStatus.DRAFT)
             # Keep draft, deduplication key and audit in ONE transaction. Do not call
             # trusted legacy helpers here: they commit individually.
             self.db.execute('INSERT INTO words(id,person_id,text,kind,meaning_cue,first_sound,status,added_by) '

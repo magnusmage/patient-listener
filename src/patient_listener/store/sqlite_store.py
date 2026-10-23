@@ -314,13 +314,14 @@ class SqlStore:
         *, actor: Optional[str] = None,
     ) -> WordEntry:
         """New words start as drafts (FR-40). The agent calls this; it cannot approve."""
+        from ..text.phonetics import first_sound as derive_first_sound
         entry = WordEntry(
             id=word_id,
             person_id=person_id,
             text=text,
             kind=kind,
             meaning_cue=meaning_cue,
-            first_sound=first_sound or (text[:1].upper()),
+            first_sound=first_sound or derive_first_sound(text),
             status=WordStatus.DRAFT,
             added_by=added_by,
         )

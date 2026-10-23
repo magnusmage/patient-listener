@@ -40,3 +40,13 @@ The `schedule` extra remains as an installation compatibility alias.
 No prototype scheduling fallback is used if FSRS is missing.
 On the existing GPU environment install `python -m pip install fsrs==6.3.2`
 before reinstalling the local project with `--no-deps`. This does not reinstall PyTorch or NeMo.
+
+## Required matching/pronunciation dependencies (23 October 2026)
+
+RapidFuzz 3.14.6, Jellyfish 1.2.1, NLTK 3.10.3 and Epitran 1.35.2 now run in the code
+and are pinned as core dependencies. The matching extra remains a compatibility alias.
+CMUdict must be installed separately before automatic first-sound derivation; the app never
+silently downloads a corpus. English Epitran requires Flite lex_lookup. See
+MATCHING_PRONUNCIATION_ACCEPTANCE.md and scripts/install_english_pronunciation.sh.
+The script pins public Flite source to 6c9f20dc915b17f5619340069889db0aa007fcdc.
+Explicit first sounds avoid dictionary/fallback calls. No GPU package reinstall is necessary.

@@ -5,8 +5,9 @@ description = "A voice practice partner for adults whose speech takes time. Pure
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 readme = "README.md"
-# FSRS is required for persisted word scheduling, including offline operation.
-dependencies = ["fsrs==6.3.2"]
+# Real scheduling, matching and pronunciation libraries also run offline.
+dependencies = ["fsrs==6.3.2", "rapidfuzz==3.14.6", "jellyfish==1.2.1",
+                "nltk==3.10.3", "epitran==1.35.2"]
 
 [project.optional-dependencies]
 # Real adapters for the GPU / deploy box (ports and adapters). Not needed for the core or tests.
@@ -22,7 +23,7 @@ voice = [
 # Workbook compatibility correction: Instructor 1.17 requires jiter<0.15.
 # OpenAI 3.3.0 is the newest release resolved with that bound; see docs/DEPENDENCIES.md.
 llm = ["openai[aiohttp]==3.3.0", "tenacity==9.2.1", "instructor==1.17.0"]
-matching = ["rapidfuzz~=3.14", "jellyfish~=1.2", "nltk~=3.10", "epitran~=1.35"]
+matching = ["rapidfuzz==3.14.6", "jellyfish==1.2.1", "nltk==3.10.3", "epitran==1.35.2"]
 schedule = ["fsrs==6.3.2"]
 api = ["fastapi~=0.142", "uvicorn[standard]~=0.54", "pydantic~=2.13", "pydantic-settings~=2.15", "python-dotenv>=1,<2"]
 store = ["sqlalchemy[asyncio]~=2.1", "asyncpg~=0.31", "aiosqlite~=0.22", "alembic~=1.20"]

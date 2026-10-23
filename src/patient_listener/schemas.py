@@ -80,7 +80,7 @@ class WordEntry:
     text: str  # 1..60; "Biscuit" or a phrase "Can you open the window?"
     kind: str  # person | place | food | object | activity | phrase
     meaning_cue: str = ""  # <= 90, "Leo's puppy"
-    first_sound: str = ""  # <= 4, ARPAbet/first letter
+    first_sound: str = ""  # <= 4, stress-free ARPAbet; explicit human overrides retained
     photo_id: Optional[str] = None
     status: WordStatus = WordStatus.DRAFT
     added_by: str = "carer"  # carer | slt

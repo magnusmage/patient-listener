@@ -1,4 +1,5 @@
 """The two agent tools. No chat ingestion, approvals or detailed patient reads."""
+from ..text.phonetics import PronunciationError, PronunciationUnavailable
 from dataclasses import dataclass, field
 from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -39,6 +40,10 @@ async def add_word_draft(draft: WordDraftInput, access: Access,
         raise HTTPException(401, 'Agent access is no longer permitted') from exc
     except RequestConflict as exc:
         raise HTTPException(409, str(exc)) from exc
+    except PronunciationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except PronunciationUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
     return {**result, 'console_path':'/console.html'}
 
 

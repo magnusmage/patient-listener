@@ -50,8 +50,11 @@ def score(heard: str, target: str) -> float:
     """The FR-22 match score for a single heard phrase against a single target."""
     h = heard.lower().replace(" ", "")
     t = target.lower().replace(" ", "")
+    if not any(c.isalpha() for c in h) or not any(c.isalpha() for c in t):
+        return 0.0
     spelling = ratio(h, t) / 100.0
-    sound = 1.0 if metaphone(h) == metaphone(t) else 0.0
+    heard_sound, target_sound = metaphone(h), metaphone(t)
+    sound = 1.0 if heard_sound and heard_sound == target_sound else 0.0
     return max(spelling, 0.6 * spelling + 0.4 * sound)
 
 

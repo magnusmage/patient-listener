@@ -136,6 +136,19 @@ class AgentToolTests(unittest.TestCase):
         self.assertEqual(response.json()['found_without_hint'],0)
         self.assertEqual(self.store.audit_log()[-1]['detail'],'demo-margaret:alex')
 
+    def test_retry_does_not_repeat_pronunciation_and_setup_error_rolls_back(self):
+        from unittest.mock import patch
+        from patient_listener.text.phonetics import PronunciationUnavailable
+        result = self.add().json()
+        with patch('patient_listener.text.phonetics.first_sound',
+                   side_effect=PronunciationUnavailable('Install pronunciation assets')):
+            self.assertTrue(self.add().json()['replayed'])
+            failed = self.client.post('/api/agent/tools/add_word_draft',
+                json={'text':'Zorvella','kind':'person'},
+                headers={**self.headers, 'Idempotency-Key':'pronunciation-failure'})
+            self.assertEqual(failed.status_code, 503)
+        self.assertFalse(any(w.text=='Zorvella' for w in self.store.all_words('demo-margaret')))
+
     def test_replay_does_not_demote_a_human_approved_word(self):
         result=self.add().json()
         self.store.console_approve_word('demo-margaret',result['word_id'],actor='sam')

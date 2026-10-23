@@ -25,7 +25,18 @@ class HintStep:
 
 def sound_line(first_sound: str) -> str:
     """Level-2 template: 'It starts with K.'"""
-    return f"It starts with {first_sound.upper()}."
+    phone = first_sound.upper()
+    if len(phone) == 1 and phone.isascii() and phone.isalpha():
+        return f"It starts with {phone}."
+    if phone in {"HH", "JH"}:
+        return f"It starts with {dict(HH='H', JH='J')[phone]}."
+    names = {"CH": "ch", "SH": "sh", "TH": "th", "DH": "th", "NG": "ng", "ZH": "zh",
+             "AA": "ah", "AE": "a", "AH": "uh", "AO": "aw", "AW": "ow", "AY": "eye",
+             "EH": "eh", "ER": "er", "EY": "ay", "IH": "ih", "IY": "ee", "OW": "oh",
+             "OY": "oy", "UH": "oo", "UW": "oo"}
+    if phone in names:
+        return f"It starts with the {names[phone]} sound."
+    return "Listen for the first sound."
 
 
 def word_line(word: str) -> str:
@@ -41,7 +52,7 @@ def template_hint_lines(word: WordEntry, meaning: str | None = None) -> HintLine
         safe_meaning = f"Think about {word.kind}."
     return HintLines(
         meaning=safe_meaning[:90],
-        sound=sound_line(word.first_sound or word.text[:1]),
+        sound=sound_line(word.first_sound),
         word=word_line(word.text),
     )
 

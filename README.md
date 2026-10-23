@@ -16,8 +16,8 @@ adapters around it. The design rule, verbatim from the engineering workbook:
 ## What runs where
 
 The whole **decision core is pure code** — no GPU, no network, no model — and so is fully
-runnable and testable on a CPU. Word scheduling uses the required lightweight `fsrs==6.3.2`
-library; voice and model adapters need additional dependencies:
+runnable and testable on a CPU. FSRS, RapidFuzz and Jellyfish implement scheduling and matching;
+NLTK/CMUdict and Epitran prepare pronunciation. Voice and model adapters need additional dependencies:
 
 | Runs offline (CPU) | Needs the GPU / deploy box |
 | --- | --- |
@@ -43,6 +43,7 @@ Requires Python 3.12. From the repository root:
 ```bash
 # Install the core, including real FSRS scheduling.
 python -m pip install -e .
+python -m nltk.downloader cmudict
 
 # Run the release gate (the full API/audio suite needs its matching extras).
 python run_tests.py
@@ -255,7 +256,7 @@ patient-listener/
 │   ├── schemas.py            # frozen validated records (pydantic stand-in)
 │   ├── banned.py             # one banned-word list (UI copy lint + reply validator)
 │   ├── ports.py              # Protocols: Asr, Tts, Llm, Store, Clock
-│   ├── text/                 # fuzzy ratio (rapidfuzz stand-in) + Metaphone (jellyfish stand-in)
+│   ├── text/                 # RapidFuzz ratio, Jellyfish Metaphone, CMUdict/Epitran
 │   ├── voice/
 │   │   ├── controller.py     # the patience controller (pure, injected clock)
 │   │   ├── merge.py          # PROFILES + merge()

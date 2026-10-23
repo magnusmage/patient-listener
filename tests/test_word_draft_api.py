@@ -97,12 +97,26 @@ class WordDraftApiTests(unittest.TestCase):
                 self.assertEqual(self.create(payload={**self.payload,**change}).status_code,422)
         self.assertEqual(len(self.store.all_words('demo-margaret')),before)
 
+    def test_automatic_phoneme_and_setup_errors(self):
+        from unittest.mock import patch
+        from patient_listener.text.phonetics import PronunciationError, PronunciationUnavailable
+        result = self.create(payload={'text':'knife','kind':'object'})
+        self.assertEqual(result.status_code, 201)
+        self.assertEqual(result.json()['word']['first'], 'N')
+        before = len(self.store.all_words('demo-margaret'))
+        for error, status in [(PronunciationUnavailable('Install pronunciation assets'), 503),
+                              (PronunciationError('Supply first_sound explicitly'), 422)]:
+            with patch('patient_listener.text.phonetics.first_sound', side_effect=error):
+                response = self.create(payload={'text':'Zorvella','kind':'person'})
+                self.assertEqual(response.status_code, status)
+        self.assertEqual(len(self.store.all_words('demo-margaret')), before)
+
     def test_unicode_trim_phrase_limit_and_distinct_ids(self):
         first=self.create(payload={'text':'  Café  ','kind':'place'})
         self.assertEqual(first.status_code,201)
         self.assertEqual(first.json()['word']['text'],'Café')
-        self.assertEqual(first.json()['word']['first'],'C')
-        second=self.create(payload={'text':'x'*60,'kind':'phrase'},person='demo-margaret')
+        self.assertEqual(first.json()['word']['first'],'K')
+        second=self.create(payload={'text':'x'*60,'kind':'phrase','first_sound':'X'},person='demo-margaret')
         self.assertEqual(second.status_code,201)
         self.assertNotEqual(first.json()['word']['id'],second.json()['word']['id'])
 
