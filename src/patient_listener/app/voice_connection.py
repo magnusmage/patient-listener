@@ -1,4 +1,4 @@
-"""Per-WebSocket development voice bridge: bounded input, queued output, playback ACKs.
+"""Per-WebSocket Pipecat voice bridge: bounded input, queued output, playback ACKs.
 
 Only one voice session is permitted per GPU worker until concurrency is measured. Control
 messages remain responsive while GPU work executes in a worker thread. Cancelled GPU kernels
@@ -51,6 +51,7 @@ class VoiceConnection:
         self.played = asyncio.Event()
         self.tasks = []
         self.decoder = None
+        self.pipeline = None
         self.input_epoch = 0
         self.decoder_epoch = 0
 
@@ -69,6 +70,13 @@ class VoiceConnection:
             self._invoke, NemoStream, self.runtime, tuple(w.text for w in self.session.words),
             self.runtime.settings.boost_alpha,
         )
+        from .pipecat_pipeline import PipecatVoicePipeline
+        self.pipeline = PipecatVoicePipeline(self)
+        try:
+            await self.pipeline.start()
+        except BaseException:
+            await self.pipeline.close()
+            raise
         self.tasks = [asyncio.create_task(self._listen()), asyncio.create_task(self._speak())]
 
     async def send(self, event):
@@ -159,40 +167,40 @@ class VoiceConnection:
             while not self.closed:
                 frame, epoch = await self.input.get()
                 if epoch != self.input_epoch: continue
-                events = await worker_call(self._invoke, self._decode, frame, epoch)
-                if epoch != self.input_epoch: continue
-                for event in events:
-                    if self.closed: break
-                    if self.busy:
-                        # FR-04: playback input is control-only, never captions or answers.
-                        if event.kind in {'partial', 'final'} and event.text.strip().lower().strip('.!?') == 'stop':
-                            await self.session.handle({'type': 'stop'})
-                            break
-                        continue
-                    if event.kind == 'speech':
-                        await self.session.on_audio_speech()
-                    elif event.kind == 'partial':
-                        await self.session.on_audio_partial(event.text)
-                    elif event.kind == 'final':
-                        control = event.text.strip().lower().strip('.!?')
-                        if control in {'stop', 'yes', 'no', 'help', 'done'}:
-                            await self.session.handle({'type': control})
-                        else:
-                            if event.text:
-                                await self.session.on_audio_final(event.text)
-                            measured = getattr(self.session, 'on_audio_level', None)
-                            if measured is not None and event.level_db is not None:
-                                await measured(event.level_db, event.voiced_samples)
-                    elif event.kind == 'silence':
-                        await self.session.on_audio_silence()
+                await self.pipeline.receive(frame, epoch)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logging.getLogger(__name__).error('Voice input failed: %s', type(exc).__name__)
             await self.fail('speech_input_failed')
 
+    async def _dispatch_event(self, event):
+        if self.closed:
+            return
+        if self.busy:
+            # Playback input is control-only; Pipecat never turns echo into an answer.
+            if (event.kind in {'partial', 'final'}
+                    and event.text.strip().lower().strip('.!?') == 'stop'):
+                await self.session.handle({'type': 'stop'})
+            return
+        if event.kind == 'speech':
+            await self.session.on_audio_speech()
+        elif event.kind == 'partial':
+            await self.session.on_audio_partial(event.text)
+        elif event.kind == 'final':
+            control = event.text.strip().lower().strip('.!?')
+            if control in {'stop', 'yes', 'no', 'help', 'done'}:
+                await self.session.handle({'type': control})
+            else:
+                if event.text:
+                    await self.session.on_audio_final(event.text)
+                measured = getattr(self.session, 'on_audio_level', None)
+                if not self.closed and measured is not None and event.level_db is not None:
+                    await measured(event.level_db, event.voiced_samples)
+        elif event.kind == 'silence':
+            await self.session.on_audio_silence()
+
     async def _speak(self):
-        from .nemo_stream import synthesize
         try:
             while not self.closed:
                 queued = await self.output.get()
@@ -205,10 +213,8 @@ class VoiceConnection:
                 self.played.clear()
                 await self.send_json({'type': 'audioStart', 'id': self.sequence,
                                       'sample_rate': 22050, 'encoding': 'pcm_s16le'})
-                pcm = cached if cached is not None else await worker_call(
-                    self._invoke, synthesize, self.runtime, text)
+                await self.pipeline.speak(text, cached)
                 if self.closed: break
-                await self.socket.send_bytes(pcm)
                 await self.send_json({'type': 'audioEnd', 'id': self.sequence})
                 await asyncio.wait_for(self.played.wait(), timeout=60)
                 self.waiting_id = None
@@ -224,6 +230,8 @@ class VoiceConnection:
             await self.fail('speech_output_failed')
 
     async def fail(self, code):
+        if self.closed:
+            return
         self.closed = True
         self.session.close()
         self._drain(self.input); self._drain(self.output)
@@ -237,4 +245,7 @@ class VoiceConnection:
         for task in self.tasks: task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
         self._drain(self.input); self._drain(self.output)
+        if self.pipeline is not None:
+            await self.pipeline.close()
+            self.pipeline = None
         self.decoder = None

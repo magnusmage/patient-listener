@@ -1,4 +1,6 @@
-"""Streaming-audio boundary for the GPU deployment path.
+"""Transport-neutral ASR events and an isolated adapter test harness.
+
+The active GPU path is app.voice_connection + app.pipecat_pipeline.
 
 The browser sends 16 kHz mono PCM frames as WebSocket binary messages. This module converts
 model-specific ASR output into small, transport-neutral events and sends final text to the
@@ -8,11 +10,10 @@ existing session controller. It never stores audio or transcripts.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Iterable, Optional, Protocol
+from typing import Awaitable, Callable, Iterable, Protocol
 
-from ..config import Settings
 
-__all__ = ["AsrEvent", "AudioPipeline", "audio_available", "build_pipeline"]
+__all__ = ["AsrEvent", "AudioPipeline"]
 
 _MAX_PCM_FRAME_BYTES = 32_768
 _MAX_TRANSCRIPT_CHARS = 500
@@ -36,15 +37,6 @@ class _StreamingAsr(Protocol):
 
 class _TtsLike(Protocol):
     async def speak(self, text: str, voice: str) -> Iterable[bytes]: ...
-
-
-def audio_available(settings: Settings) -> bool:
-    """True only when the optional NeMo runtime is present and models are configured."""
-    try:
-        import nemo_toolkit  # type: ignore  # noqa: F401
-    except Exception:
-        return False
-    return bool(settings.asr_model and settings.tts_model)
 
 
 class AudioPipeline:
@@ -106,12 +98,3 @@ class AudioPipeline:
         """Render a listener line on the deploy box; the browser remains half-duplex."""
         async for chunk in await self.tts.speak(text, self.voice):
             await self.send_audio(chunk)
-
-
-def build_pipeline(settings: Settings, **hooks) -> Optional[AudioPipeline]:  # noqa: ANN003
-    """Construct production adapters on the GPU deploy box, or return ``None`` locally."""
-    if not audio_available(settings):
-        return None
-    # The next deployment-specific subtask supplies NeMoStreamingAsr and MagpieTts here.
-    # Keeping imports lazy protects the local backend demo from heavyweight voice dependencies.
-    raise NotImplementedError("construct NeMo/Magpie adapters for the GPU deployment")

@@ -50,3 +50,12 @@ silently downloads a corpus. English Epitran requires Flite lex_lookup. See
 MATCHING_PRONUNCIATION_ACCEPTANCE.md and scripts/install_english_pronunciation.sh.
 The script pins public Flite source to 6c9f20dc915b17f5619340069889db0aa007fcdc.
 Explicit first sounds avoid dictionary/fallback calls. No GPU package reinstall is necessary.
+
+## Pipecat framework compatibility (23 October 2026)
+
+The voice framework is pinned to pipecat-ai==1.12.0, matching workbook D-07.
+The pipeline extra supports CPU framework tests without installing GPU model libraries.
+Actual Pipecat 1.12.0 metadata requires soundfile~=0.13.1 and soxr~=1.0.0; the earlier
+soundfile~=0.14 / soxr~=1.1 voice-extra bounds were incompatible. Those bounds now follow
+Pipecat and constitute an explicit workbook library-version correction. Voice models and
+wire rates are unchanged. See PIPECAT_ACCEPTANCE.md for GPU install and smoke tests.

@@ -5,9 +5,8 @@ pure decision core. It serves the static frontend, issues short-lived session to
 real :class:`~patient_listener.voice.session.SessionEngine` over a WebSocket speaking the event
 protocol ``web/app.js`` already consumes, and backs the therapist console with real store data.
 
-Nothing here is imported by the pure core, so the core stays stdlib-only and GPU-free. The
-optional audio transport (:mod:`patient_listener.app.audio`) is import-guarded and only becomes
-active with the ``voice`` extra and model weights present.
+Nothing here is imported by the decision core. Text mode does not load GPU models or Pipecat.
+The live voice path lazily loads app.pipecat_pipeline and the NeMo/Magpie adapters.
 """
 
 from __future__ import annotations

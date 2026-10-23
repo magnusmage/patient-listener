@@ -247,7 +247,7 @@ Each requirement maps to a test — see `tests/` and the "Reference" tab of the 
 
 ```
 patient-listener/
-├── pyproject.toml            # package + optional extras (core is stdlib-only) + pytest config
+├── pyproject.toml            # package + optional extras + pytest config
 ├── .env.example              # the only config (read in config.py)
 ├── run_tests.py              # offline test runner + release-gate summary
 ├── src/patient_listener/
@@ -282,7 +282,9 @@ patient-listener/
 │   │   ├── presenter.py      #   pure WordEntry/safety -> UI payloads
 │   │   ├── console_api.py    #   therapist console REST, backed by the store
 │   │   ├── tokens.py         #   HMAC 15-minute session tokens
-│   │   └── audio.py          #   audio transport scaffold (NeMo/Magpie; deploy box)
+│   │   ├── pipecat_pipeline.py # real Pipecat frames around local NeMo/Magpie
+│   │   ├── voice_connection.py # bounded WebSocket voice and playback ACKs
+│   │   └── audio.py          # shared ASR events and isolated adapter harness
 │   ├── nightly.py            # Serverless Job entry (offline-runnable)
 │   └── tools/                # switch.py (kill switch), seed.py (demo people)
 ├── web/                      # the frontend (no framework, no build step)
@@ -321,3 +323,10 @@ MIT (see `LICENSE`). Third-party models and tools are used under their own licen
 `NOTICE`.
 
 For the PostgreSQL migration and deployment sequence, see [Database deployment](docs/DATABASE_DEPLOYMENT.md).
+
+### Pipecat voice pipeline
+
+Live voice sessions use Pipecat 1.12.0 processors around the existing local NeMo/Magpie
+adapters, with our controller owning turn timing. The CPU framework can be installed with
+`python -m pip install -e ".[pipeline]"`; the voice extra adds GPU model dependencies.
+See [Pipecat acceptance](docs/PIPECAT_ACCEPTANCE.md) for GPU update and browser checks.

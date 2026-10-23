@@ -123,12 +123,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health(request: Request) -> JSONResponse:
         runtime = request.app.state.voice_runtime
         voice_enabled = request.app.state.settings.voice_enabled
+        pipeline_version = getattr(runtime, 'pipecat_version', None)
+        pipeline_version = pipeline_version if isinstance(pipeline_version, str) else None
         # Do not advertise production voice readiness merely because weights loaded.
         return JSONResponse({
             "status": "voice_development" if voice_enabled else "text_ready",
             "voice_enabled": voice_enabled,
             "models_loaded": runtime is not None,
             "streaming_ready": False,
+            "pipeline_framework": "pipecat" if pipeline_version else None,
+            "pipecat_version": pipeline_version,
             "development_voice_enabled": runtime is not None,
         }, status_code=503 if voice_enabled else 200,
            headers={"Cache-Control": "no-store"})

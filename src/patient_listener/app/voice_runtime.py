@@ -22,9 +22,12 @@ class VoiceRuntime:
     settings: Any = None
     gpu_lock: Any = field(default_factory=threading.Lock)
     fixed_clips: dict[str,bytes] = field(default_factory=dict)
+    pipecat_version: str | None = None
 
     @classmethod
     def load(cls, settings: Settings) -> "VoiceRuntime":
+        from .pipecat_pipeline import require_pipecat
+        pipeline_version = require_pipecat()
         import torch
         from nemo.collections.asr.models import ASRModel
         from nemo.collections.tts.models import MagpieTTSModel
@@ -43,6 +46,7 @@ class VoiceRuntime:
             runtime = cls(asr, tts, torch.cuda.get_device_name(0),
                        round(time.perf_counter() - started, 3),
                        round(torch.cuda.memory_allocated() / 1024**3, 3), vad, settings)
+            runtime.pipecat_version = pipeline_version
             from ..voice.fixed_audio import prepare_fixed
             count = prepare_fixed(runtime)
             logging.getLogger("uvicorn.error.patient_listener.voice").info(

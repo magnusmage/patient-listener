@@ -10,14 +10,16 @@ dependencies = ["fsrs==6.3.2", "rapidfuzz==3.14.6", "jellyfish==1.2.1",
                 "nltk==3.10.3", "epitran==1.35.2"]
 
 [project.optional-dependencies]
+# CPU-only framework integration tests; voice adds the GPU model dependencies.
+pipeline = ["pipecat-ai==1.12.0"]
 # Real adapters for the GPU / deploy box (ports and adapters). Not needed for the core or tests.
 voice = [
-  "pipecat-ai[nvidia,silero,websocket]~=1.12",
+  "pipecat-ai[nvidia,silero,websocket]==1.12.0",
   "nemo_toolkit[asr,tts]~=3.0",
   "silero-vad~=6.2",
   "cuda-bindings>=13.0.0",     # NeMo #15480
   "torch>=2.6",                # CVE-2025-32434
-  "numpy~=2.5", "soundfile~=0.14", "librosa~=1.0", "pyloudnorm~=0.2", "soxr~=1.1",
+  "numpy~=2.5", "soundfile~=0.13.1", "librosa~=1.0", "pyloudnorm~=0.2", "soxr~=1.0.0",
   "audiotsm==0.1.2",
 ]
 # Workbook compatibility correction: Instructor 1.17 requires jiter<0.15.

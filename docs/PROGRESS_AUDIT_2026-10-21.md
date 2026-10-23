@@ -523,3 +523,41 @@ latency acceptance remain required. Matching changes are not committed at this c
 The supplied native installer was also verified in an isolated Python 3.12 Linux image.
 An offline run with networking disabled exercised real Epitran/Flite for Farida (F), and
 real CMUdict for knife (N) and chair (CH). GPU installation and listening checks are next.
+
+
+## 23 October: real Pipecat voice path
+
+The user confirmed matching/pronunciation on the GPU; that milestone was committed locally
+as 4118576. Nothing was pushed. The active voice connection now runs real Pipecat 1.12.0
+Pipeline/PipelineWorker/WorkerRunner objects around local NeMo/Silero, the patience controller,
+Magpie and custom authenticated browser transport. Audio, VAD, partial/final transcription and
+TTS output use framework frames, including distinct start/continuing-speaking events.
+
+Direct processing within the existing bounded workers preserves capture/control responsiveness
+and backpressure. No default aggregator, automatic turn completion/interruption, Smart Turn,
+RTVI, idle timeout or transcript observer is enabled. Rates remain 16000 Hz in / 22050 Hz out;
+custom socket output does not resample or use MediaSender. Browser playback acknowledgements,
+prepared audio, target restriction, check taps, safety and capture epochs remain in effect.
+
+Added redacted speech frame string/repr output, stage/type-only error logs, pipeline lifecycle
+cleanup, idempotent terminal failures and a five-second live-synthesis stall watchdog. Late
+GPU output is discarded and the GPU slot stays occupied until outstanding work finishes.
+New sessions build a fresh pipeline after release; a permanently hung GPU process still needs
+an operational restart. Health separately reports the framework/version and retains unmeasured
+production readiness=false. Removed the unused audio scaffold's NotImplementedError factory.
+
+The pipeline extra installs the CPU framework without requesting GPU model libraries. Actual
+Pipecat 1.12.0 metadata forced explicit compatibility corrections to soundfile~=0.13.1 and
+soxr~=1.0.0. See DEPENDENCIES.md and PIPECAT_ACCEPTANCE.md for the correction and GPU steps.
+
+Verification: 410 backend tests passed, including ten real-framework tests with synthetic
+models and an authenticated mixed JSON/PCM WebSocket test. Nine opt-in PostgreSQL tests were
+skipped in this transport-focused run. All 24 browser checks passed and pip check reported no
+broken requirements. Separate text-mode startup imported neither Pipecat nor PyTorch.
+No paid calls or NeMo/Magpie weight downloads/GPU inference occurred. Actual GPU smoke testing,
+deployed latency/Stop timing and concurrency gates remain outstanding. This Pipecat update is
+not committed at this checkpoint.
+
+GPU confirmation: the user reported the Pipecat voice update working and confirmed that
+the displayed cancellation/cleanup logs followed an intentional Stop. This is a successful
+manual smoke test; measured production latency and concurrency gates remain outstanding.
