@@ -32,7 +32,8 @@ def select_words(store, person_id: str, limit: int):
 async def generate_plan(store, person_id: str, *, actor: str, llm, max_words: int = 1,
                         use_ai: bool = False,
                         render: Callable[[str], Awaitable[bytes]] | None = None,
-                        tts_model: str = '', voice: str = '', max_model_calls: int | None = None) -> dict:
+                        tts_model: str = '', voice: str = '', max_model_calls: int | None = None,
+                        audio_profile: str = 'legacy') -> dict:
     if not store.can_manage_profile(person_id, actor):
         raise PermissionError('Plan generation requires the linked decision-maker')
     if type(max_words) is not int or not 1 <= max_words <= 10:
@@ -76,7 +77,7 @@ async def generate_plan(store, person_id: str, *, actor: str, llm, max_words: in
                     raise ValueError('Renderer must return nonempty mono PCM16 audio')
                 if len(pcm) > 22050 * 2 * 20:
                     raise ValueError('A generated hint exceeds the 20 second audio limit')
-                clips.append((word.id, level, text, tts_model, voice, pcm))
+                clips.append((word.id, level, text, tts_model, voice, pcm, audio_profile))
     # If switched off during rendering, never publish model-authored hint content.
     if model_hints and not store.is_ai_enabled():
         raise PlanConflict('AI was disabled during generation; retry with templates')

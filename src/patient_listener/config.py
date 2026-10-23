@@ -101,10 +101,16 @@ class Settings:
     fsrs_desired_retention: float = field(default_factory=lambda: (_f("FSRS_DESIRED_RETENTION", 0.85)))
     fsrs_maximum_interval: int = field(default_factory=lambda: (int(os.environ.get("FSRS_MAXIMUM_INTERVAL", "60"))))
     boost_alpha: float = field(default_factory=lambda: (_f("BOOST_ALPHA", 2.0)))
+    hint_audio_rate: float = field(default_factory=lambda: (_f("HINT_AUDIO_RATE", 0.8)))
+    backchannel_clip_path: str = field(default_factory=lambda: (os.environ.get("BACKCHANNEL_CLIP_PATH", "")))
     clip_lufs: float = field(default_factory=lambda: (_f("CLIP_LUFS", -20.0)))
 
     def assert_safe_startup(self) -> None:
         """Fail fast on the issue-driven invariants (NemoClaw #12409, NFR-07)."""
+        if self.hint_audio_rate not in (.8, 1.0):
+            raise ValueError("HINT_AUDIO_RATE must be 0.8 or 1.0")
+        if not -30 <= self.clip_lufs <= -14:
+            raise ValueError("CLIP_LUFS must be between -30 and -14")
         if self.telegram_group_policy != "disabled":
             raise ValueError("TELEGRAM_GROUP_POLICY must be 'disabled' (NemoClaw #12409)")
         if tuple(int(x) for x in self.openshell_min_version.split(".")) < (0, 0, 34):

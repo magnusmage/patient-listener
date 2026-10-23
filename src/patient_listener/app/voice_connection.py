@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from ..voice.processing import hint_profile
 
 
 async def worker_call(fn, *args):
@@ -97,15 +98,26 @@ class VoiceConnection:
         await self.send_json(event)
         text = spoken_text(event)
         if text:
-            self._audio_busy(True)
             if event['type'] == 'hint':
                 store = getattr(self.session, 'store', None)
                 if store is not None:
                     pcm = store.hint_audio(self.session.person_id, event['word_id'], event['level'],
-                        text, self.runtime.settings.tts_model, self.runtime.settings.tts_voice)
+                        text, self.runtime.settings.tts_model, self.runtime.settings.tts_voice,
+                        profile=hint_profile(self.runtime.settings))
                     if pcm is not None:
+                        self._audio_busy(True)
                         self.output.put_nowait((text, pcm))
                         return
+                await self.send_json({'type': 'voiceNotice', 'text': 'You can read the hint.'})
+                return
+            fixed = getattr(self.runtime, 'fixed_clips', {})
+            if isinstance(fixed, dict) and text in fixed:
+                self._audio_busy(True)
+                self.output.put_nowait((text, fixed[text]))
+                return
+            if event['type'] == 'backchannel':
+                raise RuntimeError('Fixed backchannel audio was not prepared')
+            self._audio_busy(True)
             # Sentence-by-sentence synthesis. A bounded queue fails visibly instead of growing forever.
             for sentence in re.split(r'(?<=[.!?])\s+', text):
                 self.output.put_nowait(sentence)

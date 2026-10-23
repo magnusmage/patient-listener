@@ -218,7 +218,7 @@ class PlanApiTests(unittest.TestCase):
     def test_audio_generation_reuses_loaded_runtime(self):
         runtime=SimpleNamespace(gpu_lock=threading.Lock(),close=lambda:None)
         self.client.app.state.voice_runtime=runtime
-        with patch('patient_listener.app.nemo_stream.synthesize',return_value=b'\0\0') as synth:
+        with patch('patient_listener.app.nemo_stream.render_hint',return_value=b'\0\0') as synth:
             response=self.generate({})
         self.assertEqual(response.status_code,200)
         self.assertEqual(response.json()['rendered_clips'],3)

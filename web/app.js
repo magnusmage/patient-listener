@@ -64,6 +64,7 @@
       if (d.partial && state.captions.at(-1)?.who === 'you') state.captions.pop();
       pushCaption(d.who || 'you', d.text);
     });
+    on('voiceNotice', (d) => { pushCaption('listener', d.text); });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
     on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
     on('state', (d) => { state.ringMode = d.state; updateRing(); });

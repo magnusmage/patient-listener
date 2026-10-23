@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from patient_listener.app.audio import AsrEvent
+from patient_listener.voice.processing import hint_profile
 from patient_listener.app.voice_connection import VoiceConnection
 
 
@@ -197,7 +198,8 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 c.acknowledge(start['id'])
                 self.assertEqual((await asyncio.wait_for(events.get(),1))['type'],'audioIdle')
                 c.session.store.hint_audio.assert_called_once_with(
-                    'person','word',1,'A family pet.','model','voice')
+                    'person','word',1,'A family pet.','model','voice',
+                    profile=hint_profile(c.runtime.settings))
             finally: await c.close()
 
 
@@ -245,3 +247,34 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 c.session.on_audio_level.assert_not_awaited()
                 c.session.on_audio_final.assert_not_awaited()
             finally:release.set();await c.close()
+
+
+    async def test_fixed_backchannel_uses_cached_pcm_not_live_magpie(self):
+        c,events=self.connection()
+        c.runtime.fixed_clips={'mm':b'\1\0'}
+        with patch('patient_listener.app.nemo_stream.NemoStream',Decoder), patch(
+                'patient_listener.app.nemo_stream.synthesize') as synth:
+            await c.start()
+            try:
+                await c.send({'type':'backchannel','key':'mm','caption':'mm'})
+                await events.get()
+                start=await asyncio.wait_for(events.get(),1)
+                await events.get()
+                c.socket.send_bytes.assert_awaited_once_with(b'\1\0')
+                synth.assert_not_called()
+                c.acknowledge(start['id'])
+            finally:await c.close()
+
+    async def test_missing_hint_stays_text_only_without_live_synthesis(self):
+        c,events=self.connection()
+        c.runtime.settings.tts_model='m';c.runtime.settings.tts_voice='v'
+        c.session.person_id='p'
+        from unittest.mock import Mock
+        c.session.store=SimpleNamespace(hint_audio=Mock(return_value=None))
+        with patch('patient_listener.app.nemo_stream.synthesize') as synth:
+            await c.send({'type':'hint','text':'A family pet.','word_id':'w','level':1})
+            self.assertEqual((await events.get())['type'],'hint')
+            self.assertEqual((await events.get())['type'],'voiceNotice')
+            self.assertTrue(c.output.empty())
+            synth.assert_not_called()
+        await c.close()

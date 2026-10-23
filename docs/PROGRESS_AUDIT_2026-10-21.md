@@ -451,3 +451,37 @@ synthetic release gates green. No paid inference, GPU model execution or cloud
 resource creation occurred. Actual microphone, browser processing and GPU playback
 acceptance remain to be performed using BEING_HEARD_ACCEPTANCE.md. Changes are
 uncommitted at this checkpoint; this entry does not claim full workbook compliance.
+
+
+## 23 October: prepared prompt cache and hint DSP
+
+User confirmed the measured Being heard update worked on the GPU; its local
+commit is e0aac02. This is a qualitative confirmation, not an exact acoustic or
+latency acceptance measurement.
+
+Added a startup-only Magpie cache for ten fixed lines. The listening caption mm
+now uses the synthesis input Mm-hmm.; repeated playback uses cached bytes. An
+optional reviewed synthetic PCM16 WAV can replace that candidate if listening
+finds its pronunciation unsuitable. No human audition of this new candidate has
+been recorded yet. Fixed preparation must finish before the runtime is returned.
+
+Hint preparation uses audiotsm WSOLA at 0.8x with 500 ms between sentences and
+pyloudnorm toward -20 LUFS. Peak headroom can limit gain; short clips repeat only
+for measurement. Runtime hint playback requires exact text/model/voice and a
+matching processing profile, otherwise it stays text-only with a readable notice;
+it never synthesizes a missing hint live. Regenerate hints before the audio demo.
+
+Added additive SQLite cache-column upgrade and PostgreSQL Alembic 0002. Existing
+clips remain legacy and are preserved. A populated local PostgreSQL 0001->0002
+migration preserved its test clip. Snapshot import now requires the current head.
+
+Verification: 378 default backend tests passed; eight real PostgreSQL integration
+tests passed separately (386 backend checks total), 24 browser checks passed and
+seven synthetic release gates green. Real CPU tests cover duration/pitch, LUFS,
+exact gaps, short clips and cache identity. No Token Factory calls or patient data
+were used. Disposable local PostgreSQL was used, not Nebius or the user's pl.db.
+
+See PREPARED_AUDIO_ACCEPTANCE.md. Actual GPU startup/synthesis, mm listening,
+three-listener G-06 naturalness and deployed latency remain unverified. The
+normal-speed G-06 fallback is explicit HINT_AUDIO_RATE=1.0; record the gate result
+before using it for submission. Changes remain uncommitted at this checkpoint.

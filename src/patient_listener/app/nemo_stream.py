@@ -124,4 +124,13 @@ def synthesize(runtime, text):
             text, language='en', apply_TN=False, speaker_index=0,
         )
         data = audio[0, :int(lengths[0])].detach().float().cpu().numpy()
-    return (data.clip(-1, 1) * 32767).astype('<i2').tobytes()
+    from ..voice.processing import normalize
+    return normalize((data.clip(-1, 1) * 32767).astype('<i2').tobytes(),
+                     getattr(runtime.settings, 'clip_lufs', -20.0))
+
+
+def render_hint(runtime,text):
+    import re
+    from ..voice.processing import prepare_hint
+    sentences=[part for part in re.split(r'(?<=[.!?])\s+',text.strip()) if part]
+    return prepare_hint([synthesize(runtime,part) for part in sentences],runtime.settings)

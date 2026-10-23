@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS nightly_runs (
 );
 CREATE TABLE IF NOT EXISTS hint_audio (
     person_id TEXT NOT NULL, word_id TEXT NOT NULL, level INTEGER NOT NULL,
-    text TEXT NOT NULL, model TEXT NOT NULL, voice TEXT NOT NULL, pcm BLOB NOT NULL,
+    text TEXT NOT NULL, model TEXT NOT NULL, voice TEXT NOT NULL, pcm BLOB NOT NULL, profile TEXT NOT NULL DEFAULT 'legacy',
     PRIMARY KEY (person_id, word_id, level)
 );
 CREATE TABLE IF NOT EXISTS person_settings (person_id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -521,7 +521,7 @@ class SqlStore:
                 self._db.execute("DELETE FROM hint_audio WHERE person_id=? AND word_id=?",
                                  (plan.person_id, word.id))
             self._db.executemany(
-                "INSERT INTO hint_audio(person_id,word_id,level,text,model,voice,pcm) VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO hint_audio(person_id,word_id,level,text,model,voice,pcm,profile) VALUES (?,?,?,?,?,?,?,?)",
                 [(plan.person_id, *clip) for clip in clips])
             self._db.execute("INSERT INTO plans(person_id,mode,items,pause) VALUES (?,?,?,?) ON CONFLICT(person_id) DO UPDATE SET mode=excluded.mode,items=excluded.items,pause=excluded.pause",
                 (plan.person_id, plan.mode, json.dumps([asdict(i) for i in plan.items]),
@@ -530,12 +530,12 @@ class SqlStore:
                              (actor, "generate_plan", plan.person_id, _now()))
 
     def hint_audio(self, person_id: str, word_id: str, level: int, text: str,
-                   model: str, voice: str) -> bytes | None:
+                   model: str, voice: str, *, profile: str = 'legacy') -> bytes | None:
         row = self._db.execute(
             "SELECT a.pcm FROM hint_audio a JOIN words w ON w.id=a.word_id "
             "AND w.person_id=a.person_id WHERE a.person_id=? AND a.word_id=? AND a.level=? "
-            "AND a.text=? AND a.model=? AND a.voice=? AND w.status='approved'",
-            (person_id, word_id, level, text, model, voice)).fetchone()
+            "AND a.text=? AND a.model=? AND a.voice=? AND a.profile=? AND w.status='approved'",
+            (person_id, word_id, level, text, model, voice, profile)).fetchone()
         return bytes(row["pcm"]) if row else None
 
     def load_plan(self, person_id: str) -> Plan:
@@ -714,5 +714,7 @@ class SqliteStore(SqlStore):
         self._db = sqlite3.connect(path, check_same_thread=check_same_thread)
         self._db.row_factory = sqlite3.Row
         self._db.executescript("PRAGMA journal_mode=WAL;" + _SCHEMA)
+        if 'profile' not in {row[1] for row in self._db.execute('PRAGMA table_info(hint_audio)')}:
+            self._db.execute("ALTER TABLE hint_audio ADD COLUMN profile TEXT NOT NULL DEFAULT 'legacy'")
         self._db.commit()
         self._initialize_ai(ai_enabled)

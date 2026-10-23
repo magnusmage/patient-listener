@@ -11,7 +11,8 @@ async def run_generation(app, access, pid, options, *, on_admitted=None):
     import importlib.util
     from ..llm.factory import build_llm
     from ..plan_generation import generate_plan, PlanConflict
-    from .nemo_stream import synthesize
+    from .nemo_stream import render_hint
+    from ..voice.processing import hint_profile
     from .voice_connection import worker_call
     state = app.state.pl
     if not access.store.can_manage_profile(pid, access.user_id):
@@ -41,12 +42,12 @@ async def run_generation(app, access, pid, options, *, on_admitted=None):
         async def render(text):
             def locked_render():
                 with runtime.gpu_lock:
-                    return synthesize(runtime, text)
+                    return render_hint(runtime, text)
             return await worker_call(locked_render)
         return await generate_plan(access.store, pid, actor=access.user_id,
             llm=build_llm(state.settings, access.store), max_words=options.max_words,
             use_ai=options.use_ai, render=render if options.render_audio else None,
-            tts_model=state.settings.tts_model, voice=state.settings.tts_voice, **limits)
+            tts_model=state.settings.tts_model, voice=state.settings.tts_voice, audio_profile=hint_profile(state.settings), **limits)
     except HTTPException:
         raise
     except PermissionError as exc:

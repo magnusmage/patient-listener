@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import threading
 import gc
 import time
+import logging
 from typing import Any
 
 from ..config import Settings
@@ -20,6 +21,7 @@ class VoiceRuntime:
     vad: Any = None
     settings: Any = None
     gpu_lock: Any = field(default_factory=threading.Lock)
+    fixed_clips: dict[str,bytes] = field(default_factory=dict)
 
     @classmethod
     def load(cls, settings: Settings) -> "VoiceRuntime":
@@ -31,18 +33,27 @@ class VoiceRuntime:
         if not torch.cuda.is_available():
             raise RuntimeError('VOICE_ENABLED requires a CUDA-capable PyTorch environment')
         started = time.perf_counter()
-        asr = tts = None
+        asr = tts = runtime = None
         try:
             asr = ASRModel.from_pretrained(model_name=settings.asr_model).to('cuda').eval()
             tts = MagpieTTSModel.from_pretrained(settings.tts_model).to('cuda').eval()
             asr.encoder.set_default_att_context_size([70, 1])
             vad = load_silero_vad()
             torch.cuda.synchronize()
-            return cls(asr, tts, torch.cuda.get_device_name(0),
+            runtime = cls(asr, tts, torch.cuda.get_device_name(0),
                        round(time.perf_counter() - started, 3),
                        round(torch.cuda.memory_allocated() / 1024**3, 3), vad, settings)
+            from ..voice.fixed_audio import prepare_fixed
+            count = prepare_fixed(runtime)
+            logging.getLogger("uvicorn.error.patient_listener.voice").info(
+                "Prepared fixed audio clips count=%d", count)
+            runtime.load_seconds = round(time.perf_counter() - started, 3)
+            return runtime
         except BaseException:
             # Release partially loaded model references when the second model cannot load.
+            if runtime is not None:
+                runtime.asr = runtime.tts = runtime.vad = None
+                runtime.fixed_clips.clear()
             asr = tts = None
             gc.collect()
             torch.cuda.empty_cache()
@@ -53,5 +64,6 @@ class VoiceRuntime:
         self.asr = None
         self.tts = None
         self.vad = None
+        self.fixed_clips.clear()
         gc.collect()
         torch.cuda.empty_cache()

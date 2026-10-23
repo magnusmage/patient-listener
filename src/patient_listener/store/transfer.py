@@ -4,7 +4,7 @@ import re
 import sqlite3
 from urllib.parse import quote
 from .sqlite_store import _SCHEMA
-from .postgres_store import PostgresConnection
+from .postgres_store import PostgresConnection, REVISION
 
 TABLES=tuple(re.findall(r'CREATE TABLE IF NOT EXISTS (\w+)',_SCHEMA))
 CREDENTIAL_TABLES={'console_tokens','agent_credentials'}
@@ -25,7 +25,7 @@ def import_sqlite(source, database_url):
         tables={r[0] for r in snapshot.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
         if tables-set(TABLES):raise ValueError('Source has unknown tables; review its schema before importing')
         target=PostgresConnection(database_url)
-        if target.execute('SELECT version_num FROM alembic_version').fetchone()[0]!='0001':
+        if target.execute('SELECT version_num FROM alembic_version').fetchone()[0]!=REVISION:
             raise ValueError('Upgrade the target schema first')
         counts={}
         with target:
