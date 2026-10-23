@@ -65,14 +65,15 @@
       pushCaption(d.who || 'you', d.text);
     });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
-    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
+    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
     on('state', (d) => { state.ringMode = d.state; updateRing(); });
     on('backchannel', (d) => { pushCaption('listener', d.caption); });
     on('offerHint', () => { state.ringMode = 'hint_offered'; pushCaption('listener', 'Want a hint?'); state.offerHint = true; show('P3'); });
     on('hint', (d) => { state.hint = d; state.offerHint = false; pushCaption('listener', d.text); show('P3'); });
     on('confirm', (d) => { state.confirmWord = d.word; pushCaption('listener', `Did you say ${d.word}?`); show('P3'); });
     on('found', (d) => { state.today.push(d.word); flashFound(d.word); });
-    on('loudness', (d) => { state.loudness = d.strong ? 'ok' : 'soft'; if (!d.strong) pushCaption('listener', 'A bit stronger?'); show('P3'); });
+    on('calibrationReady', (d) => { state.calibrationReady = d.ready === true; render(); });
+    on('loudness', (d) => { state.loudnessPosition = d.position; state.loudness = d.strong ? 'ok' : 'soft'; show('P3'); });
     on('whatIHeard', (d) => { state.whatIHeard = d.text; show('P3'); });
     on('reply', (d) => { pushCaption('listener', d.text); });
     on('moveOn', () => { pushCaption('listener', "Let's try another."); });
@@ -228,12 +229,13 @@
     // Prompt + photo
     app.append(h('div', { class: 'pl-card' },
       h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
-      h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') })));
+      h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') }),
+      p.instruction ? h('p', {}, p.instruction) : null));
 
     // Profile-specific feedback area (P3b)
-    if (state.feedback === 'loudness') app.append(loudnessBar());
+    if (state.feedback === 'loudness' && !p.calibration) app.append(loudnessBar());
     if (state.feedback === 'time_used') app.append(timeBar());
-    if (state.feedback === 'what_i_heard' && state.whatIHeard) app.append(whatIHeardCard());
+    if (state.whatIHeard) app.append(whatIHeardCard());
 
     // Ring (static; a timer is never shown)
     const ringLabel = profile === 'words_out' ? 'I am listening. Take all the time you need.' : 'Listening';
@@ -249,13 +251,17 @@
 
     // Actions: one main action per profile + Stop (in the topbar)
     const row = h('div', { class: 'pl-btn-row' });
-    if (state.confirmWord) {
+    if (p.calibration) {
+      row.append(h('button', {class: 'pl-btn pl-btn--primary', disabled: state.calibrationReady ? null : '',
+        onclick: () => { state.calibrationReady = false; client.calibrationNext(); render(); }}, 'Use this phrase'));
+      row.append(h('button', {class: 'pl-btn pl-btn--secondary', onclick: () => client.calibrationSkip()}, 'Practise without voice level'));
+    } else if (state.confirmWord) {
       row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.confirmWord = null; client.answer(true); } }, `Yes, ${state.confirmWord}`));
       row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.confirmWord = null; client.answer(false); } }, 'No'));
     } else if (state.offerHint) {
       row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.offerHint = false; client.answer(true); } }, 'Yes, a hint'));
       row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.offerHint = false; client.answer(false); } }, 'No, keep going'));
-    } else if (state.feedback === 'what_i_heard' && state.whatIHeard) {
+    } else if (state.whatIHeard) {
       row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.whatIHeard = null; client.confirmTap(true); } }, '✓ That is right'));
       row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.whatIHeard = null; client.confirmTap(false); } }, '✎ Not quite'));
     } else {
@@ -282,13 +288,13 @@
   }
 
   function loudnessBar() {
-    const pct = state.loudness === 'ok' ? 80 : state.loudness === 'soft' ? 35 : 55;
+    const pct = Number.isFinite(state.loudnessPosition) ? Math.max(0, Math.min(100, state.loudnessPosition * 100)) : 0;
     return h('div', { class: 'pl-card' },
-      h('p', { class: 'pl-prompt' }, state.loudness === 'soft' ? 'A bit stronger?' : 'Good and clear.'),
-      h('div', { class: 'pl-bar', role: 'img', 'aria-label': state.loudness === 'soft' ? 'Your voice is below your usual level' : 'Your voice is at a good level' },
+      h('p', { class: 'pl-prompt' }, state.loudness === 'soft' ? 'A bit stronger?' : 'Your voice level'),
+      h('div', { class: 'pl-bar', role: 'img', 'aria-label': state.loudness === 'soft' ? 'Your voice is below the level you chose today' : state.loudness ? 'Your voice is near the level you chose today' : 'Waiting for microphone speech' },
         h('div', { class: 'pl-bar__fill', style: `width:${pct}%` }),
         h('div', { class: 'pl-bar__marker', style: 'left:60%' })),
-      h('div', { class: 'pl-bar__label' }, 'The line is your usual strong voice.'));
+      h('div', { class: 'pl-bar__label' }, 'The line is the voice level you chose today.'));
   }
 
   function timeBar() {

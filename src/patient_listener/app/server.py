@@ -219,6 +219,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if control.get("type") == "playback_done" and connection is not None:
                         connection.acknowledge(control.get("id"))
                     else:
+                        if connection is not None and control.get('type') in {'audio_settings', 'calibration_next'}:
+                            connection.invalidate_input()
                         await app_session.handle(control)
                 elif (frame := message.get("bytes")) is not None and connection is not None:
                     await connection.frame(frame)

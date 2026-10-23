@@ -4,7 +4,7 @@ Mirrors the flow the browser's ``DemoEngine`` used to run locally - greeting, pr
 patience clock, turn advancement - but every *decision* (safety, matching, hints, timing,
 logging) is made by the pure core. The orchestrator only owns what the core deliberately leaves
 to the I/O edge: the word cursor, the wall clock, prompt advancement, and the profile-specific
-feedback presentation (the loudness bar has no audio offline, so it is an explicit UI stand-in).
+feedback presentation. Loudness uses voiced microphone audio only, never typed text.
 
 ``SessionEngine.feed`` is synchronous and uses ``asyncio.run`` internally (for the LLM port), so
 it cannot run inside this event loop; every call is dispatched to a worker thread with
@@ -24,6 +24,7 @@ from ..types import Feedback, Need, State
 from ..voice import safety as safetymod
 from ..voice.actions import EndTurn, MoveOn, OfferRest, Praise, SafetyStop, Stop
 from ..voice.session import SessionEngine
+from ..voice.loudness import SessionLoudness, CALIBRATION_PHRASES
 from ..llm import templates
 from . import bridge, presenter
 
@@ -100,7 +101,10 @@ class AppSession:
         self._session_limit = self.cfg.max_session_min
         self._cap: Optional[asyncio.Task] = None
         self._t0 = 0.0
-        self._loud = 0
+        self.loudness = SessionLoudness()
+        self._capture_ready = False
+        self._loudness_skipped = False
+        self._capture_settings = None
         self._ticker: Optional[asyncio.Task] = None
         self._advance: Optional[asyncio.Task] = None
         self._engine_lock = asyncio.Lock()
@@ -121,7 +125,8 @@ class AppSession:
 
     def _ctx(self) -> bridge.EmitContext:
         return bridge.EmitContext(
-            feedback=self.feedback,
+            feedback=(Feedback.WHAT_I_HEARD.value if Feedback.WHAT_I_HEARD in self.cfg.feedback
+                      else self.feedback),
             last_heard=self.engine.last_heard,
             hint_level=int(self.engine.controller.level),
             found=sorted(self.engine.found),
@@ -191,8 +196,13 @@ class AppSession:
         self._cancel_advance()
         if self.ended or self.closing:
             return
+        if self.calibrating:
+            await self._calibration_prompt()
+            return
         self.current = self.words[self.idx % len(self.words)] if self.words else None
         payload = presenter.prompt_payload(self.current, self.cfg.feedback, self.profile)
+        if Feedback.LOUDNESS in self.cfg.feedback and (not self._capture_ready or self._loudness_skipped):
+            payload['instruction'] = 'Voice level is unavailable with these microphone settings. You can still practise by talking or typing.'
         item = self.plan_items.get(self.current.id) if self.current else None
         if item is not None:
             payload["text"] = item.prompt
@@ -215,7 +225,24 @@ class AppSession:
         name, data = bridge.client_message_to_event(msg)
         if self.closing and name != "stop":
             return
-        if name == "extend_session":
+        if self.calibrating and name in {'help', 'yes', 'no', 'done', 'confirm_tap',
+                                          'pause', 'speech', 'resume', 'rest', 'demo_say'}:
+            return
+        if name == 'audio_settings':
+            await self._audio_settings(data)
+        elif name == 'calibration_skip':
+            if data:
+                raise ValueError('calibration_skip takes no arguments')
+            if self.calibrating:
+                self._loudness_skipped = True
+                self.loudness = SessionLoudness()
+                await self.next_prompt()
+        elif name == 'calibration_next':
+            if data:
+                raise ValueError('calibration_next takes no arguments')
+            if self.calibrating and self._audio_idle.is_set() and self.loudness.accept_phrase():
+                await self.next_prompt()
+        elif name == "extend_session":
             if set(data) != {"minutes"}:
                 raise ValueError("extend_session requires minutes only")
             await self._extend_settings({"max_session_min": data["minutes"]})
@@ -273,7 +300,8 @@ class AppSession:
         if self.ended or self.closing:
             return
         self._cancel_ticker()
-        await self._run_engine(("speech", self.now()))
+        if not self.calibrating:
+            await self._run_engine(("speech", self.now()))
 
     async def on_audio_partial(self, text: str) -> None:
         """Forward a transient caption. Partial ASR text never reaches storage or matching."""
@@ -311,27 +339,78 @@ class AppSession:
 
     async def _heard(self, kind: str, text: str) -> None:
         self._cancel_ticker()
-        # Loudness is a session feedback bar, not a word match, and needs audio we do not have
-        # offline - so present it here as an explicit stand-in. Safety still runs, via the core.
-        if self.feedback == Feedback.LOUDNESS.value:
-            sig = safetymod.check(text)
-            if sig is not None:
+        if Feedback.LOUDNESS in self.cfg.feedback:
+            # Safety is evaluated before calibration or feedback, including typed input.
+            if safetymod.check(text) is not None:
                 await self._run_engine((kind, text, self.now()))
                 return
-            self._loud += 1
-            strong = self._loud % 2 == 0
-            events: list[Optional[dict]] = [{"type": "loudness", "strong": strong}]
-            if not strong:
-                events.append({"type": "reply", "text": "A bit stronger?"})
-            events.append({"type": "state", "state": "listening"})
-            await self._emit(events)
-            self._schedule_advance(0.8)
-            return
+            if self.calibrating:
+                await self._emit([{'type': 'caption', 'who': 'you', 'text': text}])
+                return
         await self._run_engine((kind, text, self.now()))
+
+    @property
+    def calibrating(self):
+        return (Feedback.LOUDNESS in self.cfg.feedback and self._capture_ready
+                and not self._loudness_skipped and self.loudness.baseline is None)
+
+    async def _audio_settings(self, values):
+        allowed = {'auto_gain_control', 'noise_suppression', 'echo_cancellation', 'safari', 'changed'}
+        if (set(values) != allowed or any(type(values[k]) is not bool for k in ('safari', 'changed'))
+                or any(values[k] is not None and type(values[k]) is not bool
+                       for k in ('auto_gain_control', 'noise_suppression', 'echo_cancellation'))):
+            raise ValueError('Invalid microphone settings')
+        settings = tuple(values[k] for k in sorted(allowed - {'changed'}))
+        changed = values['changed'] or self._capture_settings != settings
+        self._capture_settings = settings
+        self._capture_ready = (values['auto_gain_control'] is False
+                               and values['noise_suppression'] is False
+                               and values['echo_cancellation'] is values['safari'])
+        if changed:
+            self.loudness = SessionLoudness()
+            if self._started and Feedback.LOUDNESS in self.cfg.feedback:
+                self._cancel_ticker()
+                self._cancel_advance()
+                # Never wait inside the socket reader: playback ACKs arrive there too.
+                async def restart():
+                    await self._audio_idle.wait()
+                    if not self.ended and not self.closing:
+                        await self.next_prompt()
+                self._advance = asyncio.create_task(restart())
+
+    async def _calibration_prompt(self):
+        phrase = CALIBRATION_PHRASES[len(self.loudness.phrases)]
+        await self._emit([{'type': 'prompt', 'text': phrase, 'photo': '',
+            'topic': 'voice setup', 'profile': self.profile, 'feedback': self.feedback,
+            'calibration': True,
+            'instruction': "Keep one hand's width from the microphone. Read in your comfortable strong voice, then pause and tap Use this phrase."},
+            {'type': 'state', 'state': 'listening'}])
+
+    async def on_audio_level(self, level, count):
+        if (self.ended or self.closing or not self._started or not self._audio_idle.is_set()
+                or Feedback.LOUDNESS not in self.cfg.feedback or not self._capture_ready
+                or self._loudness_skipped):
+            return
+        if self.calibrating:
+            if self.loudness.observe(level, count):
+                await self._emit([{'type': 'calibrationReady', 'ready': True}])
+            return
+        import math
+        if (not isinstance(level, (int, float)) or not math.isfinite(level)
+                or not -120 <= level <= 1 or type(count) is not int or count < 1600):
+            return
+        event = self.loudness.feedback(level)
+        await self._emit([event])
+        if not event['strong']:
+            await self._emit([{'type': 'reply', 'text': 'A bit stronger?'}])
+        if self.current is None and self.engine.controller.state != State.CONFIRMING:
+            self._schedule_advance(0.8)
 
     # --- patience clock (server-side silence ticker) --------------------------
 
     async def _pause(self) -> None:
+        if self.calibrating:
+            return
         self._cancel_ticker()
         self._ticker = asyncio.create_task(self._tick())
 
@@ -463,5 +542,6 @@ class AppSession:
         self.closing = False
         self._cancel_cap()
         self._audio_idle.set()
+        self.loudness = SessionLoudness()
         self._cancel_ticker()
         self._cancel_advance()

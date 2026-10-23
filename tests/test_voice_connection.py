@@ -199,3 +199,49 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 c.session.store.hint_audio.assert_called_once_with(
                     'person','word',1,'A family pet.','model','voice')
             finally: await c.close()
+
+
+    async def test_measured_level_is_internal_and_follows_final_safety_processing(self):
+        c, _ = self.connection()
+        calls = []
+        async def final(text):calls.append(('text',text))
+        async def measured(level,count):calls.append(('level',level,count))
+        c.session.on_audio_final.side_effect=final
+        c.session.on_audio_level=measured
+        class MeasuredDecoder(Decoder):
+            def feed(self,frame):return [AsrEvent('final','Good morning.',-23,2560)]
+        with patch('patient_listener.app.nemo_stream.NemoStream',MeasuredDecoder):
+            await c.start()
+            try:
+                await c.frame(b'\0\0')
+                for _ in range(100):
+                    if len(calls)==2:break
+                    await asyncio.sleep(.01)
+                self.assertEqual(calls,[('text','Good morning.'),('level',-23,2560)])
+                c._set_playback(True)
+                await c.frame(b'\0\0')
+                await asyncio.sleep(.05)
+                self.assertEqual(len(calls),2)
+            finally:await c.close()
+
+    async def test_changed_capture_discards_inflight_levels(self):
+        c, _ = self.connection()
+        c.session.on_audio_level=AsyncMock()
+        entered, release = threading.Event(), threading.Event()
+        class SlowMeasuredDecoder(Decoder):
+            def feed(self,frame):
+                entered.set();release.wait(2)
+                return [AsrEvent('final','Old microphone',-23,2560)]
+        with patch('patient_listener.app.nemo_stream.NemoStream',SlowMeasuredDecoder):
+            await c.start()
+            try:
+                await c.frame(b'\0\0')
+                for _ in range(100):
+                    if entered.is_set():break
+                    await asyncio.sleep(.01)
+                self.assertTrue(entered.is_set())
+                c.invalidate_input();release.set()
+                await asyncio.sleep(.05)
+                c.session.on_audio_level.assert_not_awaited()
+                c.session.on_audio_final.assert_not_awaited()
+            finally:release.set();await c.close()

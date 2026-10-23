@@ -24,6 +24,8 @@ class AsrEvent:
 
     kind: str  # speech | partial | final | silence
     text: str = ""
+    level_db: float | None = None  # internal only; never serialized to the browser
+    voiced_samples: int = 0
 
 
 class _StreamingAsr(Protocol):

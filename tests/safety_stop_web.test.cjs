@@ -111,3 +111,38 @@ test('safety card survives late output, socket closure and a pending success scr
   driver.dispatchEvent(new CustomEvent('prompt', { detail: {} }));
   assert.ok(root.textContent.includes('Back to start'));
 });
+
+
+test('calibration is enabled only after voiced input and displays no level numbers', async () => {
+  const {context} = runtime();
+  const root = new Element('main');
+  context.document = {
+    getElementById:id => id === 'pl-root' ? root : null,
+    createElement:tag => new Element(tag),createTextNode:text => new Element('#text',String(text)),
+    documentElement:new Element('html'),
+  };
+  let driver;
+  const Base=context.window.PLClient.DemoEngine;
+  context.window.PLClient.DemoEngine=class extends Base {constructor(){super();driver=this;}};
+  vm.runInContext(fs.readFileSync(path.join(web,'app.js'),'utf8'),context);
+  const click=async text => {
+    const button=find(root,e => e.tag==='button' && e.textContent.includes(text));
+    assert.ok(button);await button.listeners.click();
+  };
+  await click('Finding the word');await click('Next');
+  await click('Start talking');await click('Yes, start');
+  let accepted=0;driver.calibrationNext=() => accepted++;
+  const emit=(type,detail) => driver.dispatchEvent(new CustomEvent(type,{detail}));
+  emit('prompt',{text:'Good morning.',feedback:'loudness',calibration:true,instruction:'Read this phrase.'});
+  let button=find(root,e => e.tag==='button' && e.textContent==='Use this phrase');
+  assert.equal(button.attrs.disabled,'');
+  emit('calibrationReady',{ready:true});
+  button=find(root,e => e.tag==='button' && e.textContent==='Use this phrase');
+  assert.equal(button.attrs.disabled,undefined);
+  await button.listeners.click();assert.equal(accepted,1);
+  emit('prompt',{text:'Go ahead when you are ready.',feedback:'loudness'});
+  emit('loudness',{strong:true,position:.6});
+  assert.ok(find(root,e => e.attrs?.style==='width:60%'));
+  assert.equal(root.textContent.includes('dB'),false);
+  assert.equal(root.textContent.includes('Good and clear'),false);
+});

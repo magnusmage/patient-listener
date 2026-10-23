@@ -127,6 +127,11 @@ class VoiceConnection:
             self.decoder_epoch = epoch
         return self.decoder.feed(frame)
 
+    def invalidate_input(self):
+        """Discard old-device/old-phrase work, including in-flight decoder results."""
+        self.input_epoch += 1
+        self._drain(self.input)
+
     async def frame(self, frame):
         if not self.closed:
             if len(frame) > 32768 or len(frame) % 2:
@@ -161,7 +166,11 @@ class VoiceConnection:
                         if control in {'stop', 'yes', 'no', 'help', 'done'}:
                             await self.session.handle({'type': control})
                         else:
-                            await self.session.on_audio_final(event.text)
+                            if event.text:
+                                await self.session.on_audio_final(event.text)
+                            measured = getattr(self.session, 'on_audio_level', None)
+                            if measured is not None and event.level_db is not None:
+                                await measured(event.level_db, event.voiced_samples)
                     elif event.kind == 'silence':
                         await self.session.on_audio_silence()
         except asyncio.CancelledError:

@@ -70,7 +70,12 @@ class SafetyStopSessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_loudness_safety_uses_core_and_cancels_next_prompt(self):
         session = await self.session("joseph")
-        await session.handle({"type": "typed", "text": "good morning"})
+        await session.handle({'type':'audio_settings','auto_gain_control':False,
+            'noise_suppression':False,'echo_cancellation':False,'safari':False,'changed':False})
+        for _ in range(5):
+            await session.on_audio_level(-23,2560)
+            await session.handle({'type':'calibration_next'})
+        await session.on_audio_level(-24,2560)
         advance = session._advance
         await session.handle({"type": "typed", "text": "my voice has been hoarse for 3 weeks"})
         self.assertTrue(session.ended)

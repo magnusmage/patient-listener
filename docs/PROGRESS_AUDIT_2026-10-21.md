@@ -428,3 +428,26 @@ conservative. Device/session admission is still process-local, so deployment sta
 single-worker until shared admission is implemented. Managed TLS/restart testing,
 endpoint separation, Serverless Job/saq scheduling, actual Hermes/OpenShell and
 Telegram integration plus the remaining workbook acceptance gates remain open.
+
+
+## 23 October: Being heard microphone measurement and calibration
+
+Replaced the backend alternating loudness result with voiced-PCM energy/count
+measurement, five user-confirmed calibration phrases and their median baseline.
+The 2 dB boundary produces the fixed A bit stronger? prompt; a bounded relative
+bar position is sent, not dB values. No measurement is persisted. Calibration
+collects multiple speech segments per phrase and cannot be completed by typing.
+The person can practise without the meter instead of completing calibration.
+
+Browser processing requests and actual getSettings checks follow the workbook,
+including Safari's echo-cancellation exception. A settings/device change resets
+the baseline and invalidates queued/in-flight audio. Word matching remains
+independent; combined Being clear still requires the check tap. Stop, playback,
+safety and hoarseness are covered. The offline browser replay remains simulated.
+
+Verification: 366 backend tests passed, eight PostgreSQL integration tests skipped
+(the disposable server was not running), 24 browser checks passed and all seven
+synthetic release gates green. No paid inference, GPU model execution or cloud
+resource creation occurred. Actual microphone, browser processing and GPU playback
+acceptance remain to be performed using BEING_HEARD_ACCEPTANCE.md. Changes are
+uncommitted at this checkpoint; this entry does not claim full workbook compliance.

@@ -89,3 +89,38 @@ test('audioCancel discards old playback without ending the session or acknowledg
   sources[1].onended();
   assert.deepEqual(sent,[{type:'playback_done',id:2}]);
 });
+
+
+test('Being heard disables gain and noise processing with the Safari echo exception', () => {
+  const {context} = driver();
+  const options = context.window.PLClient.loudnessCaptureOptions;
+  assert.deepEqual(JSON.parse(JSON.stringify(options(['being_heard'],'Chrome Safari'))),
+    {autoGainControl:false,noiseSuppression:false,echoCancellation:false,channelCount:1});
+  assert.equal(options(['being_heard'],'Version/18 Safari').echoCancellation,true);
+  assert.equal(options(['finding_words'],'Chrome Safari').echoCancellation,true);
+});
+
+test('actual microphone settings are reported and device changes request recalibration', () => {
+  const {c,sent} = driver();
+  c.setProfile('being_heard');
+  let settings = {autoGainControl:false,noiseSuppression:false,echoCancellation:false,
+    sampleRate:48000,channelCount:1,deviceId:'private-device-one'};
+  c.stream.getAudioTracks = () => [{getSettings:() => settings}];
+  c._reportCaptureSettings();
+  assert.deepEqual(sent,[{type:'audio_settings',auto_gain_control:false,
+    noise_suppression:false,echo_cancellation:false,safari:false,changed:false}]);
+  c._reportCaptureSettings(); assert.equal(sent.length,1);
+  settings = {...settings,deviceId:'private-device-two'};
+  c._reportCaptureSettings(); assert.equal(sent.at(-1).changed,true);
+  assert.equal(JSON.stringify(sent).includes('private-device'),false);
+  c.calibrationNext(); assert.deepEqual(sent.at(-1),{type:'calibration_next'});
+});
+
+test('unsupported microphone processing is reported honestly', () => {
+  const {c,sent} = driver();
+  c.setProfile('being_heard');
+  c._reportCaptureSettings();
+  assert.equal(sent[0].auto_gain_control,null);
+  assert.equal(sent[0].noise_suppression,null);
+  assert.equal(sent[0].echo_cancellation,null);
+});

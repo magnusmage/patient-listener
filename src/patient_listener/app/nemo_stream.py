@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 
 from .audio import AsrEvent
+from ..voice.loudness import VoicedLevel
 
 
 class NemoStream:
@@ -47,6 +48,7 @@ class NemoStream:
         self.previous = None
         self.predictions = None
         self.text = ''
+        self.level = VoicedLevel()
         self.segment_samples = 0
 
     def decode(self, samples):
@@ -86,6 +88,9 @@ class NemoStream:
                 probabilities = [float(self.vad(self.torch.from_numpy(samples[i:i+512].copy()), 16000))
                                  for i in range(0, 2560, 512)]
                 voiced = max(probabilities) >= .5
+                for index, probability in enumerate(probabilities):
+                    if probability >= .5:
+                        self.level.add(samples[index * 512:(index + 1) * 512])
                 if voiced:
                     self.quiet_samples = 0
                     events.append(AsrEvent('speech'))
@@ -101,8 +106,9 @@ class NemoStream:
                     if text and text != old:
                         events.append(AsrEvent('partial', text))
                     if not voiced and self.quiet_samples >= 10240:  # close ASR segment, not controller turn
-                        if self.text.strip():
-                            events.append(AsrEvent('final', self.text.strip()))
+                        if self.text.strip() or self.level.level() is not None:
+                            events.append(AsrEvent('final', self.text.strip(),
+                                                   self.level.level(), self.level.count))
                         self.speaking = False
                         self.reset_decoder()
                         events.append(AsrEvent('silence'))

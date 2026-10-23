@@ -50,3 +50,67 @@ def loudness_feedback(
     Shown as a bar and the words 'A bit stronger?' - never a dB number.
     """
     return "a_bit_stronger" if (db - baseline) <= floor else None
+
+
+class VoicedLevel:
+    """Bounded-memory RMS accumulator; callers supply only VAD-positive samples."""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.square_sum = 0.0
+        self.count = 0
+
+    def add(self, samples):
+        for sample in samples:
+            value = float(sample)
+            if not math.isfinite(value) or abs(value) > 1:
+                raise ValueError('Expected finite normalized audio samples')
+            self.square_sum += value * value
+            self.count += 1
+
+    def level(self):
+        if self.count < 1600 or self.square_sum <= 0:
+            return None
+        return round(20 * math.log10(math.sqrt(self.square_sum / self.count) + 1e-9), 8)
+
+
+CALIBRATION_PHRASES = (
+    'Good morning.', 'How are you today?', 'Please open the window.',
+    'I would like some water.', 'Thank you very much.',
+)
+
+
+class SessionLoudness:
+    """Five user-confirmed phrases; no levels or samples are persisted."""
+    def __init__(self):
+        self.phrases = []
+        self.baseline = None
+        self.pending_power = 0.0
+        self.pending_count = 0
+
+    def observe(self, level, count):
+        if (not isinstance(level, (int, float)) or not math.isfinite(level)
+                or not -120 <= level <= 1 or type(count) is not int or count < 1600):
+            return False
+        self.pending_power += 10 ** (level / 10) * count
+        self.pending_count += count
+        return True
+
+    def accept_phrase(self):
+        if self.baseline is not None or not self.pending_count:
+            return False
+        self.phrases.append(10 * math.log10(self.pending_power / self.pending_count))
+        self.pending_power = 0.0
+        self.pending_count = 0
+        if len(self.phrases) == 5:
+            self.baseline = baseline_db(self.phrases)
+        return True
+
+    def feedback(self, level):
+        if self.baseline is None:
+            return None
+        strong = loudness_feedback(round(level - self.baseline, 6), 0.0) is None
+        # Unitless bar position only; neither absolute nor relative dB leaves the server.
+        position = max(0.0, min(1.0, 0.6 + (level - self.baseline) / 20))
+        return {'type': 'loudness', 'strong': strong, 'position': round(position, 3)}

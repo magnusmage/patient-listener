@@ -166,23 +166,42 @@ class DemoEngine extends EventTarget {
   stop(reason) { this._clear(); this._emit('ended', { reason, found: this.found.slice() }); }
 }
 
+// Relative microphone levels require stable processing (workbook FR-13).
+function loudnessCaptureOptions(needs, userAgent = '') {
+  const measured = needs.includes('being_heard');
+  const safari = /Safari/.test(userAgent) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(userAgent);
+  return { autoGainControl: !measured, noiseSuppression: !measured,
+    echoCancellation: !measured || safari, channelCount: 1 };
+}
+
 /* Live driver: WebSocket + mic + AudioWorklet. Used when window.PL_WS_URL is set. */
 class LiveDriver extends EventTarget {
   constructor(url, token) {
     super(); this.url = url; this.token = token; this.device = patientDeviceId();
     this.person = 'margaret'; this.ws = null; this.ctx = null; this.node = null;
     this.stream = null; this.source = null; this.stopped = false; this.muted = false;
-    this.audioId = null;
+    this.audioId = null; this.needs = []; this._captureSignature = null;
   }
-  setProfile(need) { this.person = NEED_TO_PERSON[need] || 'margaret'; }
+  setProfile(need) { this.person = NEED_TO_PERSON[need] || 'margaret'; this.needs = [need]; }
   async start() {
     this.stopped = false;
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       await this.ctx.resume();
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: true, noiseSuppression: true, channelCount: 1
-      } });
+      if (!this.url || !this.token) {
+        const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}`, {
+          headers: { 'X-PL-Device': this.device }, cache: 'no-store'
+        });
+        if (!response.ok) throw new Error('Session request failed');
+        const session = await response.json();
+        if (!session.voice_enabled) throw new Error('GPU voice is not enabled on this server');
+        this.url = session.ws_url; this.token = session.token; this.needs = session.needs || this.needs;
+      }
+      this._captureSignature = null;
+      this._captureSafari = /Safari/.test(navigator.userAgent || '') && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(navigator.userAgent || '');
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: loudnessCaptureOptions(this.needs, navigator.userAgent || '')
+      });
       if (this.stopped) { this.stop(); return; }
       await this.ctx.audioWorklet.addModule('worklet.js');
       const src = this.ctx.createMediaStreamSource(this.stream);
@@ -192,27 +211,19 @@ class LiveDriver extends EventTarget {
       this.node.port.onmessage = ev => {
         if (!this.stopped && !this.muted && this.ws?.readyState === 1) {
           if (this.ws.bufferedAmount > 32768) { this.stop(); return; }
+          this._reportCaptureSettings();
           this.ws.send(ev.data);
         }
       };
       src.connect(this.node);
       const silent = this.ctx.createGain(); silent.gain.value = 0;
       this.node.connect(silent); silent.connect(this.ctx.destination);
-      if (!this.url || !this.token) {
-        const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}`, {
-          headers: { 'X-PL-Device': this.device }, cache: 'no-store'
-        });
-        if (!response.ok) throw new Error('Session request failed');
-        const session = await response.json();
-        if (!session.voice_enabled) throw new Error('GPU voice is not enabled on this server');
-        this.url = session.ws_url; this.token = session.token;
-      }
       if (this.stopped) return;
       await new Promise((resolve, reject) => {
         const separator = this.url.includes('?') ? '&' : '?';
         this.ws = new WebSocket(`${this.url}${separator}token=${encodeURIComponent(this.token)}&device=${encodeURIComponent(this.device)}&voice=true`);
         this.ws.binaryType = 'arraybuffer';
-        this.ws.onopen = () => { this._send({ type: 'start' }); resolve(); };
+        this.ws.onopen = () => { this._reportCaptureSettings(); this._send({ type: 'start' }); resolve(); };
         this.ws.onerror = () => reject(new Error('Voice connection failed'));
         this.ws.onmessage = e => this._message(e.data);
         this.ws.onclose = () => {
@@ -222,6 +233,20 @@ class LiveDriver extends EventTarget {
         };
       });
     } catch (error) { this.stop(); throw error; }
+  }
+  _reportCaptureSettings() {
+    if (!this.needs.includes('being_heard')) return;
+    const track = this.stream?.getAudioTracks?.()[0];
+    const actual = track?.getSettings?.() || {};
+    const signature = JSON.stringify([actual.autoGainControl, actual.noiseSuppression,
+      actual.echoCancellation, actual.sampleRate, actual.channelCount, actual.deviceId]);
+    if (signature === this._captureSignature) return;
+    const changed = this._captureSignature !== null;
+    this._captureSignature = signature;
+    const flag = key => typeof actual[key] === 'boolean' ? actual[key] : null;
+    this._send({type: 'audio_settings', auto_gain_control: flag('autoGainControl'),
+      noise_suppression: flag('noiseSuppression'), echo_cancellation: flag('echoCancellation'),
+      safari: !!this._captureSafari, changed});
   }
   _message(data) {
     if (this.stopped) return;
@@ -256,6 +281,8 @@ class LiveDriver extends EventTarget {
   }
   _send(obj) { if (!this.stopped && this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj)); }
   mute(value) { this.muted = value; if (this.node) this.node.port.postMessage({ type: 'mute', value }); }
+  calibrationNext() { this._send({type: 'calibration_next'}); }
+  calibrationSkip() { this._send({type: 'calibration_skip'}); }
   help() { this._send({ type: 'help' }); }
   answer(yes) { this._send({ type: yes ? 'yes' : 'no' }); }
   confirmTap(ok) { this._send({ type: 'confirm_tap', ok }); }
@@ -332,6 +359,8 @@ class ServerDriver extends EventTarget {
   saySomethingElse() { this._send({ type: 'demo_say', variant: 'other' }); }
   strokePhrase() { this._send({ type: 'demo_say', variant: 'stroke' }); }
   typed(text) { this._send({ type: 'typed', text }); }
+  calibrationNext() { this._send({type: 'calibration_next'}); }
+  calibrationSkip() { this._send({type: 'calibration_skip'}); }
   help() { this._send({ type: 'help' }); }
   answer(yes) { this._send({ type: yes ? 'yes' : 'no' }); }
   confirmTap(ok) { this._send({ type: 'confirm_tap', ok }); }
@@ -357,6 +386,6 @@ function plMode() {
 window.PLClient = {
   DemoEngine, LiveDriver, ServerDriver, PROFILES,
   mode: plMode,
-  patientDeviceId,
+  patientDeviceId, loudnessCaptureOptions,
   isLive: () => plMode() === 'audio',
 };
