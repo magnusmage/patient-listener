@@ -184,13 +184,14 @@ class PostgresConnection:
 
 
 class PostgresStore(SqlStore):
-    def __init__(self,url,*,ai_enabled=None):
+    def __init__(self,url,*,ai_enabled=None,schedule_settings=None):
         try:
             self._db=PostgresConnection(url)
             row=self._db.execute('SELECT version_num FROM alembic_version').fetchone()
             if not row or row[0]!=REVISION:
                 raise RuntimeError('Unsupported database revision')
             self._initialize_ai(ai_enabled)
+            self._initialize_schedule(schedule_settings)
         except Exception:
             if hasattr(self, '_db'):
                 self.close()

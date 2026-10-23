@@ -485,3 +485,13 @@ See PREPARED_AUDIO_ACCEPTANCE.md. Actual GPU startup/synthesis, mm listening,
 three-listener G-06 naturalness and deployed latency remain unverified. The
 normal-speed G-06 fallback is explicit HINT_AUDIO_RATE=1.0; record the gate result
 before using it for submission. Changes remain uncommitted at this checkpoint.
+
+
+## 23 October: real FSRS scheduling
+
+Replaced the prototype interval/retrievability formula with required FSRS 6.3.2.
+Actual logged attempts now update cards atomically; settings reach the scheduler.
+Prototype/missing cards are rebuilt from saved attempt history on startup, preserving
+original prototype JSON and all attempt rows. Approved due-word selection uses actual FSRS
+retrievability and caps at ten. See FSRS_ACCEPTANCE.md for GPU update and verification.
+This closes the previously recorded FSRS stand-in gap; unrelated outstanding items remain open.

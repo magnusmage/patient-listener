@@ -11,12 +11,12 @@ def open_store(settings: Settings | None = None, *, sqlite_path: str | None = No
         if sqlite_path is not None:
             raise ValueError('Unset PL_DB_PATH / --db when using PostgreSQL DATABASE_URL')
         from .postgres_store import PostgresStore
-        return PostgresStore(url,ai_enabled=cfg.ai_enabled)
+        return PostgresStore(url,ai_enabled=cfg.ai_enabled,schedule_settings=cfg)
     if not url.startswith(('sqlite:///','sqlite+aiosqlite:///')):
         raise ValueError('DATABASE_URL must select PostgreSQL or SQLite')
     path=sqlite_path if sqlite_path is not None else url.split(':///',1)[1]
     if not path:raise ValueError('SQLite requires a file path or :memory:')
-    return SqliteStore(path,check_same_thread=False,ai_enabled=cfg.ai_enabled)
+    return SqliteStore(path,check_same_thread=False,ai_enabled=cfg.ai_enabled,schedule_settings=cfg)
 
 
 def open_admin_store(sqlite_path: str | None = None):

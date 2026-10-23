@@ -1,5 +1,5 @@
 """The data store (workbook: D-10). Production is Nebius Managed PostgreSQL via async
-SQLAlchemy; developer machines use SQLite. This is a dependency-free SQLite implementation of
+SQLAlchemy; developer machines use SQLite. This is a SQLite implementation of
 the ``Store`` port plus the console/nightly operations, suitable for the offline sandbox and
 for dev. Every read is scoped by ``person_id`` (row-level access). No text or audio is stored
 in ``attempts`` (FR-23); only word ids, numbers and timestamps.
@@ -393,27 +393,79 @@ class SqlStore:
 
     # --- attempts -------------------------------------------------------------
 
-    def log_attempt(self, attempt: Attempt) -> None:
-        w = self._read_word(attempt.word_id)
-        person_id = w.person_id if w else ""
+    def _initialize_schedule(self, settings=None) -> None:
+        from ..config import Settings
+        from ..schedule.fsrs import Card, Scheduler
+        cfg = settings or Settings()
+        self._scheduler = Scheduler(cfg.fsrs_desired_retention, cfg.fsrs_maximum_interval)
+        # Upgrade only prototype/missing cards. Native cards are never replayed on restart.
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            rows = self._db.execute("SELECT person_id, word_id, card FROM cards").fetchall()
+            cards = {(r["person_id"], r["word_id"]): r["card"] for r in rows}
+            history = self._db.execute("SELECT DISTINCT person_id, word_id FROM attempts").fetchall()
+            for row in history:
+                cards.setdefault((row["person_id"], row["word_id"]), None)
+            for (person_id, word_id), value in cards.items():
+                if value is not None and "card_id" in json.loads(value):
+                    continue
+                card = Card.from_json(value) if value is not None else Card.new()
+                card = self._replay_reviews(person_id, word_id, card)
+                self._write_card(person_id, word_id, card.to_json())
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
+
+    def _replay_reviews(self, person_id, word_id, card):
+        from ..schedule.fsrs import to_rating, utc
+        rows = self._db.execute(
+            "SELECT * FROM attempts WHERE person_id=? AND word_id=? ORDER BY id",
+            (person_id, word_id)).fetchall()
+        # Sort parsed UTC times, rather than strings with potentially different offsets.
+        for row in sorted(rows, key=lambda r: (utc(datetime.fromisoformat(r["at"])), r["id"])):
+            card = self._scheduler.review_card(card,
+                to_rating(Outcome(row["outcome"]), HintLevel(row["hint_level"]),
+                          row["seconds_to_find"]), datetime.fromisoformat(row["at"]))
+        return card
+
+    def _write_card(self, person_id, word_id, value):
         self._db.execute(
-            """INSERT INTO attempts
-               (session_id, person_id, word_id, hint_level, outcome, seconds_to_find,
-                match_score, confirmed, at)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
-            (
-                attempt.session_id,
-                person_id,
-                attempt.word_id,
-                int(attempt.hint_level),
-                attempt.outcome.value,
-                attempt.seconds_to_find,
-                attempt.match_score,
-                1 if attempt.confirmed else 0,
-                attempt.at.isoformat(),
-            ),
-        )
-        self._db.commit()
+            "INSERT INTO cards(person_id, word_id, card) VALUES (?,?,?) "
+            "ON CONFLICT(person_id,word_id) DO UPDATE SET card=excluded.card",
+            (person_id, word_id, value))
+
+    def log_attempt(self, attempt: Attempt) -> None:
+        from ..schedule.fsrs import Card, to_rating, utc
+        at = utc(attempt.at)
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            word = self._read_word(attempt.word_id)
+            if word is None:
+                raise ValueError("Cannot schedule an unknown word")
+            person_id = word.person_id
+            value = self.get_card(person_id, word.id)
+            card = Card.from_json(value) if value else Card.new()
+            self._db.execute(
+                """INSERT INTO attempts
+                   (session_id, person_id, word_id, hint_level, outcome, seconds_to_find,
+                    match_score, confirmed, at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (attempt.session_id, person_id, word.id, int(attempt.hint_level),
+                 attempt.outcome.value, attempt.seconds_to_find, attempt.match_score,
+                 int(attempt.confirmed), at.isoformat()))
+            if card.native.last_review is not None and at < card.native.last_review:
+                # Imported/backdated attempts must not cause negative review intervals.
+                fresh = Card.new()
+                fresh.legacy = card.legacy
+                card = self._replay_reviews(person_id, word.id, fresh)
+            else:
+                card = self._scheduler.review_card(card,
+                    to_rating(attempt.outcome, attempt.hint_level, attempt.seconds_to_find), at)
+            self._write_card(person_id, word.id, card.to_json())
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
 
     def attempts_for(self, person_id: str, since_days: Optional[int] = None) -> list[dict]:
         if since_days is None:
@@ -708,13 +760,18 @@ def _pause_from_needs(needs: frozenset[Need]) -> PauseConfig:
 
 
 class SqliteStore(SqlStore):
-    """Dependency-free development adapter; PostgreSQL uses the same operations."""
+    """SQLite development adapter; PostgreSQL uses the same operations and FSRS library."""
     def __init__(self, path: str = ":memory:", check_same_thread: bool = True,
-                 *, ai_enabled: bool | None = None) -> None:
+                 *, ai_enabled: bool | None = None, schedule_settings=None) -> None:
         self._db = sqlite3.connect(path, check_same_thread=check_same_thread)
         self._db.row_factory = sqlite3.Row
         self._db.executescript("PRAGMA journal_mode=WAL;" + _SCHEMA)
         if 'profile' not in {row[1] for row in self._db.execute('PRAGMA table_info(hint_audio)')}:
             self._db.execute("ALTER TABLE hint_audio ADD COLUMN profile TEXT NOT NULL DEFAULT 'legacy'")
         self._db.commit()
-        self._initialize_ai(ai_enabled)
+        try:
+            self._initialize_ai(ai_enabled)
+            self._initialize_schedule(schedule_settings)
+        except BaseException:
+            self._db.close()
+            raise

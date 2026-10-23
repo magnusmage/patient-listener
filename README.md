@@ -16,10 +16,10 @@ adapters around it. The design rule, verbatim from the engineering workbook:
 ## What runs where
 
 The whole **decision core is pure code** — no GPU, no network, no model — and so is fully
-runnable and testable anywhere, including in a sandbox with nothing installed but the Python
-standard library:
+runnable and testable on a CPU. Word scheduling uses the required lightweight `fsrs==6.3.2`
+library; voice and model adapters need additional dependencies:
 
-| Runs offline (this repo, stdlib only) | Needs the GPU / deploy box |
+| Runs offline (CPU) | Needs the GPU / deploy box |
 | --- | --- |
 | Patience controller (state machine, injected clock) | NeMo streaming ASR (`nemo_toolkit`) |
 | Profile merge, matcher, validator, safety rules | Magpie TTS (`nemo_toolkit`) |
@@ -36,12 +36,15 @@ adapter) behind the same ports — nothing in the core changes.
 
 ---
 
-## For judges / quick start (no installs required)
+## For judges / quick start (offline)
 
 Requires Python 3.12. From the repository root:
 
 ```bash
-# Run the whole test suite (103 tests) and print the release gate — no dependencies needed.
+# Install the core, including real FSRS scheduling.
+python -m pip install -e .
+
+# Run the release gate (the full API/audio suite needs its matching extras).
 python run_tests.py
 
 # Or with stdlib unittest directly:
@@ -269,7 +272,7 @@ patient-listener/
 │   │   ├── templates.py      # fixed lines
 │   │   ├── plan.py           # nightly: write_hints, build_plan, weekly_card
 │   │   └── token_factory.py  # the real Token Factory adapter (needs network + key)
-│   ├── schedule/fsrs.py      # rating mapping + scheduler (fsrs package stand-in)
+│   ├── schedule/fsrs.py      # rating mapping + real FSRS 6.3.2 scheduler
 │   ├── store/sqlite_store.py # the data store
 │   ├── app/                  # the app API server (frontend <-> core; needs the `api` extra)
 │   │   ├── server.py         #   FastAPI factory: static web/, /api/session, /ws, console REST

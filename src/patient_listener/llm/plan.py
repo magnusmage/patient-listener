@@ -47,8 +47,11 @@ def build_plan(store, person_id: str, mode: str = "review", k: int = 10) -> Plan
     fallback if nothing is due (handled by the caller via load_plan)."""
     from ..schedule.fsrs import Card, due_tonight
 
+    if type(k) is not int or k < 0:
+        raise ValueError("Word limit must be a nonnegative integer")
+    k = min(k, 10)
     words = {w.id: w for w in store.words(person_id)}
-    cards = store.all_cards(person_id)
+    cards = {wid: value for wid, value in store.all_cards(person_id).items() if wid in words}
     # Seed a new card for any approved word without one.
     for wid in words:
         cards.setdefault(wid, Card.new().to_json())

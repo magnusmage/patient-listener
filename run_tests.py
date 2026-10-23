@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the full test suite and the release gate with no third-party dependencies.
+"""Run the offline test suite and synthetic release gate after installing test dependencies.
 
     python run_tests.py
 

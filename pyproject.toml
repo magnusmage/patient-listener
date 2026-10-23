@@ -5,10 +5,8 @@ description = "A voice practice partner for adults whose speech takes time. Pure
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 readme = "README.md"
-# The decision core (controller, matcher, validator, safety, hints, FSRS mapping, merge, store,
-# session engine) depends ONLY on the standard library, so it installs and tests with no extras.
-# numpy is optional (loudness RMS has a stdlib fallback).
-dependencies = []
+# FSRS is required for persisted word scheduling, including offline operation.
+dependencies = ["fsrs==6.3.2"]
 
 [project.optional-dependencies]
 # Real adapters for the GPU / deploy box (ports and adapters). Not needed for the core or tests.
@@ -25,7 +23,7 @@ voice = [
 # OpenAI 3.3.0 is the newest release resolved with that bound; see docs/DEPENDENCIES.md.
 llm = ["openai[aiohttp]==3.3.0", "tenacity==9.2.1", "instructor==1.17.0"]
 matching = ["rapidfuzz~=3.14", "jellyfish~=1.2", "nltk~=3.10", "epitran~=1.35"]
-schedule = ["fsrs~=6.3"]
+schedule = ["fsrs==6.3.2"]
 api = ["fastapi~=0.142", "uvicorn[standard]~=0.54", "pydantic~=2.13", "pydantic-settings~=2.15", "python-dotenv>=1,<2"]
 store = ["sqlalchemy[asyncio]~=2.1", "asyncpg~=0.31", "aiosqlite~=0.22", "alembic~=1.20"]
 jobs = ["saq~=0.26"]

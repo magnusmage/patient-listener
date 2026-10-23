@@ -29,6 +29,24 @@ class PostgresTests(unittest.TestCase):
         for user,role in (('sam','therapist'),('alex','carer'),('hermes','agent')):
             self.store.set_console_user(user,user,role);self.store.link_console_user(user,'demo-margaret')
 
+    def test_attempt_and_fsrs_card_commit_together(self):
+        from unittest.mock import patch
+        from patient_listener.schemas import Attempt
+        from patient_listener.types import HintLevel, Outcome
+        from patient_listener.schedule.fsrs import Card
+        attempt = Attempt('fsrs-test', 'w-leo', HintLevel.NONE, Outcome.FOUND, 2, 1, True)
+        before = len(self.store.attempts_for('demo-margaret'))
+        with patch.object(self.store, '_write_card', side_effect=RuntimeError('fail')):
+            with self.assertRaises(RuntimeError):
+                self.store.log_attempt(attempt)
+        self.assertEqual(len(self.store.attempts_for('demo-margaret')), before)
+        self.assertIsNone(self.store.get_card('demo-margaret', 'w-leo'))
+        self.store.log_attempt(attempt)
+        card = Card.from_json(self.store.get_card('demo-margaret', 'w-leo'))
+        self.assertEqual(card.native.last_review, attempt.at)
+        self.assertGreater(card.due_dt(), attempt.at)
+        self.assertEqual(len(self.store.attempts_for('demo-margaret')), before + 1)
+
     def test_auth_drafts_profiles_and_consent_use_real_postgres(self):
         token=self.store.issue_console_token('sam')
         self.assertEqual(self.store.console_user_for_token(token)['id'],'sam')

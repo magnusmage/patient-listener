@@ -32,3 +32,11 @@ The hash-pinned file covers only LLM dependencies, not API, voice or the whole p
 It contains Windows wheel hashes; resolve separately for Linux GPU deployment.
 Install the local project separately after its dependencies have been installed.
 Mocked tests and dependency verification require no real API key.
+
+## Required scheduling dependency (23 October 2026)
+
+`fsrs==6.3.2` is now a required core dependency, matching workbook D-13.
+The `schedule` extra remains as an installation compatibility alias.
+No prototype scheduling fallback is used if FSRS is missing.
+On the existing GPU environment install `python -m pip install fsrs==6.3.2`
+before reinstalling the local project with `--no-deps`. This does not reinstall PyTorch or NeMo.
