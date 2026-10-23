@@ -42,6 +42,8 @@ class NightlyWorker:
         seen = set()
         for name in self.cfg.nightly_people:
             pid = state.people.get(name, name)
+            if not store.person_exists(pid):
+                continue  # Deleted people must not acquire new ledger rows.
             if pid in seen:
                 continue
             seen.add(pid)

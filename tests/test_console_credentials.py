@@ -37,7 +37,8 @@ class ConsoleCredentialTests(unittest.TestCase):
             store.set_console_user("slt1", "Therapist", "therapist")
             store.link_console_user("slt1", "p1")
             store.delete_all("p1")
-            store.add_person("p1", "Another person", frozenset({Need.FINDING_WORDS}))
+            with self.assertRaises(ValueError):
+                store.add_person("p1", "Another person", frozenset({Need.FINDING_WORDS}))
             self.assertEqual(store.linked_people("slt1"), [])
         finally:
             store.close()

@@ -7,7 +7,7 @@ from .sqlite_store import _SCHEMA
 from .postgres_store import PostgresConnection, REVISION
 
 TABLES=tuple(re.findall(r'CREATE TABLE IF NOT EXISTS (\w+)',_SCHEMA))
-CREDENTIAL_TABLES={'console_tokens','agent_credentials'}
+CREDENTIAL_TABLES={'console_tokens','agent_credentials','privacy_challenges'}
 
 
 def quoted(name):return '"'+name.replace('"','""')+'"'

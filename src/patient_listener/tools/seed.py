@@ -12,6 +12,8 @@ from ..types import Need
 
 def seed_margaret(store: SqliteStore) -> str:
     pid = "demo-margaret"
+    if store.person_deleted(pid):
+        return pid
     store.add_person(pid, "Margaret", frozenset({Need.FINDING_WORDS}))
     words = [
         ("w-leo", "Leo", "person", "Leo's your grandson, he's six", "L"),
@@ -30,22 +32,27 @@ def seed_margaret(store: SqliteStore) -> str:
 
 def seed_daniyal(store: SqliteStore) -> str:
     pid = "demo-daniyal"
+    if store.person_deleted(pid):
+        return pid
     store.add_person(pid, "Daniyal", frozenset({Need.WORDS_OUT}))
     return pid
 
 
 def seed_joseph(store: SqliteStore) -> str:
     pid = "demo-joseph"
+    if store.person_deleted(pid):
+        return pid
     store.add_person(pid, "Joseph", frozenset({Need.BEING_HEARD}))
     return pid
 
 
 def seed_all(store: SqliteStore) -> dict[str, str]:
-    return {
+    people = {
         "margaret": seed_margaret(store),
         "daniyal": seed_daniyal(store),
         "joseph": seed_joseph(store),
     }
+    return {name: pid for name, pid in people.items() if store.person_exists(pid)}
 
 
 if __name__ == "__main__":  # pragma: no cover

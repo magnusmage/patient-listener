@@ -144,9 +144,13 @@ class ProfileApiTests(unittest.TestCase):
     def test_delete_removes_profile_overrides(self):
         self.update({'max_wait_s':60,'needs':['being_clear']})
         self.store.delete_all('demo-margaret')
-        self.store.add_person('demo-margaret','New',frozenset({Need.FINDING_WORDS}))
-        self.assertEqual(self.store.person_pause('demo-margaret').max_wait_s,20)
-        self.assertEqual(self.store.person_needs('demo-margaret'),frozenset({Need.FINDING_WORDS}))
+        self.assertFalse(self.store.person_exists('demo-margaret'))
+        self.assertIsNone(self.store._db.execute('SELECT data FROM person_settings WHERE person_id=?', ('demo-margaret',)).fetchone())
+        with self.assertRaises(ValueError):
+            self.store.add_person('demo-margaret','New',frozenset({Need.FINDING_WORDS}))
+        self.store.add_person('replacement-person','New',frozenset({Need.FINDING_WORDS}))
+        self.assertEqual(self.store.person_pause('replacement-person').max_wait_s,20)
+        self.assertEqual(self.store.person_needs('replacement-person'),frozenset({Need.FINDING_WORDS}))
 
     def test_restart_reseeding_does_not_replace_saved_needs_or_waits(self):
         with tempfile.TemporaryDirectory() as directory:

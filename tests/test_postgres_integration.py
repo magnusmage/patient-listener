@@ -139,6 +139,11 @@ class PostgresTests(unittest.TestCase):
             path=str(Path(temp)/'source.db');source=SqliteStore(path,ai_enabled=False);seed_all(source)
             source.log_attempt(Attempt(session_id='s',word_id='w-leo',hint_level=HintLevel.NONE,
                 outcome=Outcome.FOUND,seconds_to_find=1,match_score=1,confirmed=True))
+            from patient_listener.store.privacy import PrivacyStore
+            source.set_console_user('source-helper','Source helper','therapist')
+            source.link_console_user('source-helper','demo-margaret')
+            PrivacyStore(source).request_deletion('demo-margaret','source-helper')
+            source.delete_all('demo-joseph')
             with self.assertRaises(ValueError):import_sqlite(path,URL)
             with self.store._db:
                 self.store._db.execute('TRUNCATE '+','.join(map(quoted,TABLES))+' RESTART IDENTITY')
@@ -146,6 +151,9 @@ class PostgresTests(unittest.TestCase):
             source.close()
             self.assertEqual(result['tables']['attempts'],1)
             self.assertFalse(result['credentials_copied'])
+            self.assertTrue(self.store.person_deleted('demo-joseph'))
+            self.assertNotIn('joseph',seed_all(self.store))
+            self.assertEqual(self.store._db.execute('SELECT COUNT(*) FROM privacy_challenges').fetchone()[0],0)
             self.assertEqual(len(self.store.words('demo-margaret')),4)
             self.store.log_attempt(Attempt(session_id='new',word_id='w-leo',hint_level=HintLevel.NONE,
                 outcome=Outcome.FOUND,seconds_to_find=1,match_score=1,confirmed=True))
@@ -161,3 +169,41 @@ class PostgresTests(unittest.TestCase):
             self.assertTrue(self.store.is_ai_enabled())
         finally:
             other.close()
+
+    def test_privacy_export_delete_receipt_retention_and_restart(self):
+        from patient_listener.store.privacy import PrivacyStore
+        from patient_listener.store.postgres_store import PostgresStore
+        from patient_listener.tools.seed import seed_all
+        from datetime import timedelta
+        privacy = PrivacyStore(self.store)
+        self.store.console_update_consent('demo-margaret', {'data_sharing': True}, actor='sam', person_confirmed=True)
+        self.assertIn('Biscuit', privacy.export('demo-margaret', 'alex', person_confirmed=True))
+        token = privacy.request_deletion('demo-margaret', 'sam')['confirmation_token']
+        result = privacy.confirm_deletion('demo-margaret', 'sam', token, person_confirmed=True)
+        other = PostgresStore(URL)
+        try:
+            self.assertNotIn('margaret', seed_all(other))
+            p = PrivacyStore(other)
+            self.assertEqual(p.confirm_deletion('demo-margaret', 'sam', token, person_confirmed=True)['receipt_id'], result['receipt_id'])
+            due = datetime.fromisoformat(result['consent_evidence_retained_until'])
+            self.assertEqual(p.purge_expired_consent(due-timedelta(seconds=1))['consent_events_deleted'], 0)
+            self.assertEqual(p.purge_expired_consent(due)['consent_events_deleted'], 1)
+            self.assertTrue(other.person_exists('demo-joseph'))
+        finally: other.close()
+
+    def test_privacy_deletion_rolls_back_if_receipt_write_fails(self):
+        from patient_listener.store.privacy import PrivacyStore
+        from unittest.mock import patch
+        privacy = PrivacyStore(self.store)
+        token = privacy.request_deletion('demo-margaret', 'sam')['confirmation_token']
+        execute = self.store._db.execute
+        def fail(sql, params=()):
+            if sql.startswith('INSERT INTO deleted_people'):
+                raise RuntimeError('synthetic receipt failure')
+            return execute(sql, params)
+        with patch.object(self.store._db, 'execute', side_effect=fail):
+            with self.assertRaises(RuntimeError):
+                privacy.confirm_deletion('demo-margaret', 'sam', token, person_confirmed=True)
+        self.assertTrue(self.store.person_exists('demo-margaret'))
+        self.assertEqual(len(self.store.all_words('demo-margaret')), 4)
+        self.assertTrue(privacy.confirm_deletion('demo-margaret', 'sam', token, person_confirmed=True)['deleted'])

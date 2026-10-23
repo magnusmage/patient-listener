@@ -561,3 +561,35 @@ not committed at this checkpoint.
 GPU confirmation: the user reported the Pipecat voice update working and confirmed that
 the displayed cancellation/cleanup logs followed an intentional Stop. This is a successful
 manual smoke test; measured production latency and concurrency gates remain outstanding.
+
+
+## 23 October: person-requested export and deletion backend
+
+Added authenticated assisted export/deletion APIs and an interactive local CLI.
+A linked carer/therapist attests to the person's explicit request; ordinary carer
+progress access remains counts-only. CSV includes plain-text phrases and practice
+records, excludes credentials/recordings, and escapes spreadsheet formula prefixes.
+
+Deletion requires a separate expiring, hashed confirmation, is atomic, returns a
+completion receipt, and safely replays the successful request. Active practice or
+plan generation blocks the operation on the current single-worker deployment.
+Deleted IDs cannot be reused/reseeded; old patient tokens cannot reconnect; nightly
+jobs skip deleted people. Other patients, helper identities and the AI switch remain.
+
+The workbook's retention exceptions remain explicit: consent history is retained
+two calendar years after deletion; audit references are pseudonymized and events
+expire two years after their timestamps. Hourly maintenance also runs when nightly
+AI generation is disabled. Persistent tombstones/receipts retain no practice words.
+Revision 0003 adds confirmation/receipt tables; SQLite-to-PostgreSQL transfer keeps
+tombstones while excluding pending deletion credentials.
+
+Verification: 429 offline backend tests passed; 11 PostgreSQL integration tests
+passed separately in a disposable local PostgreSQL 16 container. A populated 0002
+schema upgraded to 0003 without losing its existing person. Tests cover rollback,
+scoping, confirmation expiry/binding, restarts, retention, CSV/CLI behavior and
+transfer of deletion state. No paid model calls or actual patient deletions occurred.
+
+See PRIVACY_API.md. Browser confirmation/export controls still need frontend wiring.
+External photo references currently block deletion until a deletion adapter exists.
+Backup/object-store/Hermes erasure, distributed leases, production identity/MFA and
+broader deployment acceptance remain open. This update is not committed or pushed.

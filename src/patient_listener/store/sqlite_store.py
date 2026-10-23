@@ -23,6 +23,16 @@ from ..types import HintLevel, Need, Outcome, WordStatus
 __all__ = ["SqlStore", "SqliteStore"]
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS privacy_challenges (
+    token_hash TEXT PRIMARY KEY, person_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deleted_people (
+    person_key TEXT PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE,
+    request_hash TEXT NOT NULL UNIQUE, actor_hash TEXT NOT NULL,
+    deleted_at TEXT NOT NULL, consent_person_id TEXT,
+    consent_delete_after TEXT NOT NULL, consent_purged_at TEXT
+);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS people (
     id TEXT PRIMARY KEY, first_name TEXT, needs TEXT, created_at TEXT
@@ -233,6 +243,8 @@ class SqlStore:
         )
 
     def add_person(self, person_id: str, first_name: str, needs: frozenset[Need]) -> None:
+        if self.person_deleted(person_id):
+            raise ValueError("Deleted person IDs cannot be reused")
         self._db.execute(
             "INSERT INTO people(id, first_name, needs, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET first_name=excluded.first_name, needs=excluded.needs",
             (person_id, first_name, json.dumps(sorted(n.value for n in needs)), _now()),
@@ -314,6 +326,8 @@ class SqlStore:
         *, actor: Optional[str] = None,
     ) -> WordEntry:
         """New words start as drafts (FR-40). The agent calls this; it cannot approve."""
+        if not self.person_exists(person_id):
+            raise KeyError(person_id)
         from ..text.phonetics import first_sound as derive_first_sound
         entry = WordEntry(
             id=word_id,
@@ -688,16 +702,15 @@ class SqlStore:
                 w.writerow(["phrase", word.text, "", "", "", "", ""])
         return buf.getvalue()
 
+    def person_deleted(self, person_id: str) -> bool:
+        from .privacy import person_key
+        return self._db.execute("SELECT 1 FROM deleted_people WHERE person_key=?",
+                                (person_key(person_id),)).fetchone() is not None
+
     def delete_all(self, person_id: str) -> dict:
-        """Delete everything for one person; completes immediately here (<= 24 h in prod)."""
-        counts = {}
-        for table in ("words", "attempts", "cards", "plans", "consents", "hint_audio", "nightly_runs", "agent_credentials", "agent_tool_requests", "person_settings", "console_links", "people"):
-            col = "id" if table == "people" else "person_id"
-            cur = self._db.execute(f"DELETE FROM {table} WHERE {col}=?", (person_id,))
-            counts[table] = cur.rowcount
-        self._db.commit()
-        self._audit("person", "delete_all", f"{person_id}:{counts}")
-        return {"deleted": True, "person_id": person_id, "counts": counts}
+        """Trusted maintenance helper; public deletion requires a bound confirmation."""
+        from .privacy import PrivacyStore
+        return PrivacyStore(self).delete_trusted(person_id)
 
     def close(self) -> None:
         self._db.close()

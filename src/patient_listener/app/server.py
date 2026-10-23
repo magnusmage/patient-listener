@@ -29,6 +29,8 @@ from .voice_connection import VoiceConnection
 from ..llm.factory import build_llm
 from .console_api import router as console_router
 from .agent_api import router as agent_router
+from .privacy_api import router as privacy_router
+from .privacy_worker import purge_retained_consent
 from .deps import build_state
 from .session import AppSession
 from .voice_runtime import VoiceRuntime
@@ -72,6 +74,7 @@ def _redact_websocket_scope(scope: dict) -> None:
 async def _lifespan(app: FastAPI):
     app.state.voice_runtime = None
     app.state.nightly_task = None
+    app.state.privacy_task = None
     db_path = os.environ.get("PL_DB_PATH")
     if (app.state.settings.nightly_enabled and not app.state.settings.database_url.startswith(
             ('postgresql://','postgresql+asyncpg://','postgres://'))
@@ -80,6 +83,7 @@ async def _lifespan(app: FastAPI):
     app.state.pl = build_state(db_path=db_path,
                                settings=app.state.settings)
     try:
+        app.state.privacy_task = asyncio.create_task(purge_retained_consent(app))
         if app.state.settings.voice_enabled:
             # Load once per worker, not once per patient. This stage does not enable streaming.
             app.state.voice_runtime = await asyncio.to_thread(
@@ -91,6 +95,9 @@ async def _lifespan(app: FastAPI):
             app.state.nightly_task = asyncio.create_task(NightlyWorker(app).run())
         yield
     finally:
+        if app.state.privacy_task is not None:
+            app.state.privacy_task.cancel()
+            await asyncio.gather(app.state.privacy_task, return_exceptions=True)
         if app.state.nightly_task is not None:
             app.state.nightly_task.cancel()
             await asyncio.gather(app.state.nightly_task, return_exceptions=True)
@@ -111,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings.assert_safe_startup()
     app.include_router(console_router)
     app.include_router(agent_router)
+    app.include_router(privacy_router)
 
     @app.middleware("http")
     async def private_api_no_cache(request: Request, call_next):
@@ -147,7 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             return JSONResponse({"error": "HTTPS is required"}, status_code=400)
         pid = state.people.get(person, person)
-        if pid not in state.people.values():
+        if pid not in state.people.values() or not state.store.person_exists(pid):
             return JSONResponse({"error": f"unknown person: {person}"}, status_code=404)
         # Header is preferred for the HTTP request; query support keeps a plain browser client
         # usable when it cannot attach a custom header. Neither value is logged or persisted.
@@ -183,6 +191,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             claims = state.signer.verify(token, device)
         except ValueError:
             await websocket.close(code=1008)  # policy violation: bad / expired token
+            return
+        if not state.store.person_exists(claims.person_id):
+            await websocket.close(code=1008)
             return
         if not await state.sessions.claim(claims.person_id):
             await websocket.close(code=1013, reason="Practice is already active on another device")
