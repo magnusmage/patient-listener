@@ -148,6 +148,8 @@ class PostgresTests(unittest.TestCase):
             setup=access.create_invite('demo-margaret','source-helper')['setup_code']
             access.redeem(setup,'a'*48)
             access.create_invite('demo-margaret','source-helper')
+            from patient_listener.store.leases import LeaseStore
+            LeaseStore(source._db).claim('demo-margaret','synthetic-owner',90)
             source.delete_all('demo-joseph')
             with self.assertRaises(ValueError):import_sqlite(path,URL)
             with self.store._db:
@@ -159,7 +161,7 @@ class PostgresTests(unittest.TestCase):
             self.assertTrue(self.store.person_deleted('demo-joseph'))
             self.assertNotIn('joseph',seed_all(self.store))
             self.assertEqual(self.store._db.execute('SELECT COUNT(*) FROM privacy_challenges').fetchone()[0],0)
-            for table in ('patient_devices','patient_invites'):
+            for table in ('patient_devices','patient_invites','session_leases'):
                 self.assertEqual(self.store._db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0)
             self.assertEqual(len(self.store.words('demo-margaret')),4)
             self.store.log_attempt(Attempt(session_id='new',word_id='w-leo',hint_level=HintLevel.NONE,
@@ -247,3 +249,17 @@ class PostgresTests(unittest.TestCase):
         with patch.object(self.store._db,'execute',side_effect=fail):
             with self.assertRaises(RuntimeError):access.redeem(setup,'a'*48)
         self.assertIsNotNone(access.redeem(setup,'a'*48))
+
+    def test_admission_leases_are_shared_and_stale_owner_cannot_release_successor(self):
+        from patient_listener.store.leases import LeaseStore
+        from patient_listener.store.postgres_store import PostgresConnection
+        a=LeaseStore(PostgresConnection(URL));b=LeaseStore(PostgresConnection(URL))
+        try:
+            self.assertTrue(a.claim('demo-margaret','first-owner',90))
+            self.assertFalse(b.claim('demo-margaret','second-owner',90))
+            self.store._db.execute('UPDATE session_leases SET expires_at=0');self.store._db.commit()
+            self.assertTrue(b.claim('demo-margaret','second-owner',90))
+            self.assertFalse(a.renew('demo-margaret','first-owner',90))
+            a.release('demo-margaret','first-owner')
+            self.assertTrue(b.owns('demo-margaret','second-owner'))
+        finally:a.close();b.close()

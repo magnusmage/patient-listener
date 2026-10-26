@@ -14,7 +14,7 @@ from ..store.sqlite_store import SqliteStore, SqlStore
 from ..store.factory import open_store
 from ..tools.seed import seed_all
 from .tokens import TokenSigner
-from .session_registry import SessionRegistry
+from .session_registry import SessionRegistry, shared_registry
 
 __all__ = ["AppState", "build_state"]
 
@@ -33,14 +33,20 @@ def build_state(db_path: str | None = None, settings: Settings | None = None) ->
     """Create and seed the application state. ``:memory:`` keeps a throwaway demo database."""
     cfg = settings or Settings()
     store = open_store(cfg,sqlite_path=db_path)
-    people = seed_all(store)
+    people = seed_all(store) if cfg.service_role!="voice" else {}
     signer = TokenSigner(secret=cfg.session_token_secret or None, ttl_s=cfg.session_token_ttl_s)
     demo_store = None
-    if cfg.console_demo_enabled:
+    if cfg.console_demo_enabled and cfg.service_role!="voice":
         demo_store = SqliteStore(check_same_thread=False, ai_enabled=cfg.ai_enabled)
         demo_people = seed_all(demo_store)
         demo_store.set_console_user("judge-demo", "Judge demo", "therapist")
         for pid in demo_people.values():
             demo_store.link_console_user("judge-demo", pid)
+    try:
+        sessions=shared_registry(store,cfg)
+    except BaseException:
+        store.close()
+        if demo_store is not None:demo_store.close()
+        raise
     return AppState(store=store, signer=signer, settings=cfg, people=people,
-                    console_demo_store=demo_store)
+                    console_demo_store=demo_store, sessions=sessions)

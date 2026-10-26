@@ -23,6 +23,9 @@ from ..types import HintLevel, Need, Outcome, WordStatus
 __all__ = ["SqlStore", "SqliteStore"]
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS session_leases (
+    resource TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at DOUBLE PRECISION NOT NULL
+);
 CREATE TABLE IF NOT EXISTS patient_invites (
     code_hash TEXT PRIMARY KEY, person_id TEXT NOT NULL,
     actor_id TEXT NOT NULL, expires_at TEXT NOT NULL

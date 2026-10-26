@@ -228,6 +228,8 @@ class PrivacyStore:
             self.db.execute('DELETE FROM privacy_challenges WHERE expires_at<=?',(now,))
             self.db.execute('DELETE FROM patient_invites WHERE expires_at<=?',(now,))
             self.db.execute('DELETE FROM patient_devices WHERE expires_at<=?',(now,))
+            from .leases import LeaseStore
+            self.db.execute('DELETE FROM session_leases WHERE expires_at<=?',(LeaseStore(self.db).clock(),))
             self.db.commit()
             return {'consent_events_deleted':count,'audit_events_deleted':audit_count}
         except BaseException:

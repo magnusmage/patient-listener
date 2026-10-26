@@ -1,4 +1,5 @@
 """Shared bounded plan work for authenticated requests and the trusted nightly worker."""
+import asyncio
 from fastapi import HTTPException
 
 
@@ -20,7 +21,8 @@ async def run_generation(app, access, pid, options, *, on_admitted=None):
     if access.demo and (options.use_ai or options.render_audio):
         raise HTTPException(403, "Judge demo plan generation supports templates and text only")
     runtime = app.state.voice_runtime
-    if options.render_audio and runtime is None:
+    remote=state.settings.service_role=="api"
+    if options.render_audio and runtime is None and not remote:
         raise HTTPException(503, "Voice models are not loaded; use render_audio=false for a text plan")
     if options.use_ai and (not access.store.is_ai_enabled() or not state.settings.nebius_api_key.strip()
                           or importlib.util.find_spec('openai') is None):
@@ -32,14 +34,18 @@ async def run_generation(app, access, pid, options, *, on_admitted=None):
         raise PlanBusy("This person has an active session or plan generation")
     gpu_claimed = False
     try:
-        if options.render_audio:
+        if options.render_audio and not remote:
             if not await state.sessions.claim('__gpu_voice__'):
                 raise PlanBusy("GPU is busy; stop the voice session before generating audio")
             gpu_claimed = True
         limits = {} if on_admitted is None else on_admitted()
         if limits is None:
             return {"already_claimed": True}
+        if remote:
+            from .remote_voice import RemoteRenderer
+            remote_renderer=RemoteRenderer(state.settings,state.sessions,pid)
         async def render(text):
+            if remote:return await remote_renderer.render(text)
             def locked_render():
                 with runtime.gpu_lock:
                     return render_hint(runtime, text)
@@ -47,7 +53,12 @@ async def run_generation(app, access, pid, options, *, on_admitted=None):
         return await generate_plan(access.store, pid, actor=access.user_id,
             llm=build_llm(state.settings, access.store), max_words=options.max_words,
             use_ai=options.use_ai, render=render if options.render_audio else None,
-            tts_model=state.settings.tts_model, voice=state.settings.tts_voice, audio_profile=hint_profile(state.settings), **limits)
+            tts_model=state.settings.tts_model, voice=state.settings.tts_voice, audio_profile=hint_profile(state.settings),
+            check_admission=lambda:state.sessions.check_owned(person_key), **limits)
+    except asyncio.CancelledError:
+        if state.sessions.was_lost(person_key) or (gpu_claimed and state.sessions.was_lost('__gpu_voice__')):
+            raise HTTPException(503,'Plan admission lost') from None
+        raise
     except HTTPException:
         raise
     except PermissionError as exc:

@@ -153,3 +153,17 @@ See PATIENT_DEVICE_ENROLLMENT.md. MFA, frontend enrollment and judge isolation,
 distributed leases and other requirements above remain open. Earlier paragraphs
 about unrestricted production session issuance describe the baseline before this fix.
 This follow-up is not committed or pushed at this checkpoint.
+
+
+## Follow-up: optional API/voice separation
+
+Device enrollment was committed locally as c246eb2 after a successful user GPU
+check. The next change adds optional CPU API and GPU voice roles, separate browser
+voice routing, authenticated remote hint rendering with bounded PCM/audio-contract
+validation, database ownership/heartbeats and unique socket session IDs. CPU text
+fallback remains local. Schema 0005 adds ephemeral hashed admission resources;
+these are excluded from database transfer. SERVICE_SPLIT.md describes the local
+common private configuration and the remaining actual GPU/cloud/PostgreSQL gates.
+This does not complete GPU containerization, high-availability fault acceptance,
+saq jobs, identity/MFA/UI or the other open workbook requirements. The current
+split-service changes are not committed or pushed at this checkpoint.

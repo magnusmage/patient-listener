@@ -75,11 +75,16 @@ class Settings:
     require_https: bool = field(default_factory=lambda: (_b("REQUIRE_HTTPS", os.environ.get("PL_ENV", "").lower() == "production")))
     trust_proxy_headers: bool = field(default_factory=lambda: (_b("TRUST_PROXY_HEADERS", False)))
     console_demo_enabled: bool = field(default_factory=lambda: (_b("CONSOLE_DEMO_ENABLED", False)))
+    service_role: str = field(default_factory=lambda: os.environ.get("PL_SERVICE_ROLE","combined").strip().lower())
+    voice_public_ws_url: str = field(default_factory=lambda: os.environ.get("VOICE_PUBLIC_WS_URL",""))
+    voice_internal_url: str = field(default_factory=lambda: os.environ.get("VOICE_INTERNAL_URL",""),repr=False)
+    voice_service_secret: str = field(default_factory=lambda: os.environ.get("VOICE_SERVICE_SECRET",""),repr=False)
+    voice_allowed_origins: tuple[str,...] = field(default_factory=lambda: tuple(x.strip().rstrip('/') for x in os.environ.get("VOICE_ALLOWED_ORIGINS","").split(',') if x.strip()))
     patient_enrollment_required: bool = field(default_factory=lambda: _b("PATIENT_ENROLLMENT_REQUIRED", False))
 
     @property
     def requires_patient_enrollment(self) -> bool:
-        return self.environment == "production" or self.patient_enrollment_required
+        return self.environment == "production" or self.service_role != "combined" or self.patient_enrollment_required
 
     telegram_bot_token: str = field(default_factory=lambda: (os.environ.get("TELEGRAM_BOT_TOKEN", "")), repr=False)  # sandbox only
     phoenix_collector_endpoint: str = field(default_factory=lambda: (os.environ.get(
@@ -113,6 +118,38 @@ class Settings:
 
     def assert_safe_startup(self) -> None:
         """Fail fast on the issue-driven invariants (NemoClaw #12409, NFR-07)."""
+        from urllib.parse import urlsplit
+        if self.service_role not in {'combined','api','voice'}:
+            raise ValueError('PL_SERVICE_ROLE must be combined, api or voice')
+        if self.service_role != 'combined':
+            if len(self.session_token_secret)<32 or len(self.voice_service_secret)<32:
+                raise ValueError('Split services require separate stable signing and service secrets of at least 32 characters')
+            if any(ord(c)<33 or ord(c)>126 for c in self.voice_service_secret):
+                raise ValueError('The service secret must be printable ASCII without whitespace')
+            if self.voice_service_secret == self.session_token_secret:
+                raise ValueError('Use distinct service and session-signing secrets')
+            if self.service_role=='api' and self.voice_enabled:
+                raise ValueError('The CPU API role must have VOICE_ENABLED=false')
+            if self.service_role=='voice' and (not self.voice_enabled or self.nightly_enabled):
+                raise ValueError('The GPU voice role requires voice on and nightly scheduling off')
+            if self.service_role=='api':
+                for value,schemes in ((self.voice_public_ws_url,{'wss','ws'}),(self.voice_internal_url,{'https','http'})):
+                    url=urlsplit(value)
+                    if (not url.hostname or url.scheme not in schemes or url.username or url.password or url.query or url.fragment
+                            or (url.scheme in {'ws','http'} and (self.environment=='production' or url.hostname not in {'127.0.0.1','localhost','::1'}))):
+                        raise ValueError('Use secure voice URLs without credentials/query; cleartext is loopback-development only')
+                if urlsplit(self.voice_public_ws_url).path != '/ws':
+                    raise ValueError('VOICE_PUBLIC_WS_URL must end with /ws')
+                if urlsplit(self.voice_internal_url).path not in {'','/'}:
+                    raise ValueError('VOICE_INTERNAL_URL must be a service origin without a path')
+            else:
+                if not self.voice_allowed_origins:
+                    raise ValueError('The voice role requires an explicit browser origin allowlist')
+                for value in self.voice_allowed_origins:
+                    url=urlsplit(value)
+                    if (not url.hostname or url.scheme not in {'http','https'} or url.username or url.password or url.path or url.query or url.fragment
+                            or (url.scheme=='http' and (self.environment=='production' or url.hostname not in {'127.0.0.1','localhost','::1'}))):
+                        raise ValueError('Browser origins must be exact HTTPS origins; HTTP is loopback-development only')
         if self.hint_audio_rate not in (.8, 1.0):
             raise ValueError("HINT_AUDIO_RATE must be 0.8 or 1.0")
         if not -30 <= self.clip_lufs <= -14:

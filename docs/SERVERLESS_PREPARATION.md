@@ -83,7 +83,7 @@ Also test the actual browser socket route after the final authentication layout 
 
 ## Production configuration gates
 
-1. Use a migrated PostgreSQL DATABASE_URL, schema 0004, with verified TLS. Do not
+1. Use a migrated PostgreSQL DATABASE_URL, schema 0005, with verified TLS. Do not
    rely on endpoint-local SQLite: endpoint disks are removed on stop/delete.
    Remove PL_DB_PATH and run tools.database upgrade as an operator migration step,
    not concurrently from every replica. Database backups and deletion retention
@@ -119,3 +119,11 @@ Also test the actual browser socket route after the final authentication layout 
 Availability, quotas, networking and websocket behavior must be checked in the
 actual project. This change creates no cloud resources, pushes no image/code,
 changes no production records and makes no paid model calls.
+
+
+## Service-split follow-up
+
+The optional api/voice roles, authenticated remote rendering and database admission
+are now implemented; see SERVICE_SPLIT.md. The original paragraph describing an
+unsplit server is the baseline before this change. Schema is now 0005. The GPU
+container and actual cloud gates remain open; combined mode is still available.

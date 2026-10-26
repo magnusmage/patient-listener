@@ -15,6 +15,7 @@ import asyncio
 import logging
 import json
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from .privacy_worker import purge_retained_consent
 from .deps import build_state
 from .session import AppSession
 from .voice_runtime import VoiceRuntime
+from .voice_api import router as voice_router
 
 __all__ = ["create_app"]
 
@@ -106,6 +108,7 @@ async def _lifespan(app: FastAPI):
         if app.state.voice_runtime is not None:
             await asyncio.to_thread(app.state.voice_runtime.close)
             app.state.voice_runtime = None
+        await app.state.pl.sessions.close()
         app.state.pl.store.close()
         if app.state.pl.console_demo_store is not None:
             app.state.pl.console_demo_store.close()
@@ -118,15 +121,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Patient Listener", lifespan=_lifespan)
     app.state.settings = settings or Settings()
     app.state.settings.assert_safe_startup()
-    app.include_router(console_router)
-    app.include_router(agent_router)
-    app.include_router(privacy_router)
-    app.include_router(patient_router)
+    if app.state.settings.service_role!='voice':
+        app.include_router(console_router)
+        app.include_router(agent_router)
+        app.include_router(privacy_router)
+        app.include_router(patient_router)
+    else:
+        app.include_router(voice_router)
 
     @app.middleware("http")
     async def private_api_no_cache(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith(("/api/console/", "/api/agent/", "/api/patient/")) or request.url.path == "/api/session":
+        if request.url.path.startswith(("/api/console/", "/api/agent/", "/api/patient/", "/internal/")) or request.url.path == "/api/session":
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -145,6 +151,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse({
             "status": "voice_development" if voice_enabled else "text_ready",
             "voice_enabled": voice_enabled,
+            "service_role": request.app.state.settings.service_role,
+            "remote_voice_configured": bool(request.app.state.settings.voice_public_ws_url),
             "models_loaded": runtime is not None,
             "streaming_ready": False,
             "pipeline_framework": "pipecat" if pipeline_version else None,
@@ -155,9 +163,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/session")
     async def session_token(
-        request: Request, person: str = Query("margaret"), device: str = Query("")
+        request: Request, person: str = Query("margaret"), device: str = Query(""), voice: bool = Query(False)
     ) -> JSONResponse:
         state = request.app.state.pl
+        if state.settings.service_role=="voice":
+            return JSONResponse({"error":"Use the CPU API for enrollment and session issuance"},status_code=404)
         if state.settings.require_https and not _is_secure(
             request.headers, request.url.scheme, trust_proxy_headers=state.settings.trust_proxy_headers
         ):
@@ -184,11 +194,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         needs = sorted(n.value for n in state.store.person_needs(pid))
         return JSONResponse(
             {
-                "ws_url": f"{scheme}://{host}/ws",
+                "ws_url": state.settings.voice_public_ws_url if state.settings.service_role=="api" and voice else f"{scheme}://{host}/ws",
                 "token": token,
                 "person": person,
                 "needs": needs,
-                "voice_enabled": request.app.state.voice_runtime is not None,
+                "voice_enabled": request.app.state.voice_runtime is not None or state.settings.service_role=="api",
             }
         )
 
@@ -197,6 +207,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                  voice: bool = Query(False)) -> None:
         _redact_websocket_scope(websocket.scope)
         state = websocket.app.state.pl
+        if state.settings.service_role=='voice' and websocket.headers.get('origin','') not in state.settings.voice_allowed_origins:
+            await websocket.close(code=1008)
+            return
+        if state.settings.service_role=='api' and voice:
+            await websocket.close(code=1008)
+            return
         if state.settings.require_https and not _is_secure(
             websocket.headers, websocket.url.scheme, trust_proxy_headers=state.settings.trust_proxy_headers
         ):
@@ -238,7 +254,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await direct_send(event)
 
             app_session = AppSession(store=state.store, person_id=claims.person_id, send=send,
-                                     llm=build_llm(state.settings, state.store))
+                                     llm=build_llm(state.settings, state.store),
+                                     session_id=secrets.token_urlsafe(24))
             if voice:
                 connection = VoiceConnection(runtime, app_session, websocket, direct_send)
                 await connection.start()
@@ -258,6 +275,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         await app_session.handle(control)
                 elif (frame := message.get("bytes")) is not None and connection is not None:
                     await connection.frame(frame)
+        except asyncio.CancelledError:
+            if state.sessions.was_lost(claims.person_id) or (gpu_claimed and state.sessions.was_lost('__gpu_voice__')):
+                await websocket.close(code=1013,reason='Session admission unavailable')
+            else:
+                raise
         except WebSocketDisconnect:
             pass
         except (ValueError, asyncio.QueueFull):
@@ -273,7 +295,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Static frontend last, so /api/* and /ws win. html=True serves index.html at "/".
     web = _web_dir()
-    if web.is_dir():
+    if web.is_dir() and app.state.settings.service_role!="voice":
         app.mount("/", StaticFiles(directory=str(web), html=True), name="web")
 
     return app

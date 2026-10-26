@@ -189,7 +189,7 @@ class LiveDriver extends EventTarget {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       await this.ctx.resume();
       if (!this.url || !this.token) {
-        const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}`, {
+        const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}&voice=true`, {
           headers: { 'X-PL-Device': this.device }, cache: 'no-store'
         });
         if (!response.ok) throw new Error('Session request failed');
