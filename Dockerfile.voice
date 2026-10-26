@@ -1,0 +1,41 @@
+# Candidate GPU image: validate on the GPU host before cloud deployment.
+FROM python:3.12-slim-bookworm AS build
+ENV VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git ca-certificates libsndfile1 ffmpeg espeak-ng libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/* && python -m venv /opt/venv
+WORKDIR /build
+COPY deploy/voice-constraints.txt /tmp/voice-constraints.txt
+RUN pip install --no-cache-dir Cython packaging \
+    && pip install --no-cache-dir torch==2.9.1 torchaudio==2.9.1 torchvision==0.24.1 \
+       --index-url https://download.pytorch.org/whl/cu128
+COPY pyproject.toml README.md LICENSE NOTICE ./
+COPY src ./src
+RUN pip install --no-cache-dir -c /tmp/voice-constraints.txt ".[api,store,llm,voice]" \
+    && pip check
+COPY scripts/install_english_pronunciation.sh /tmp/install_pronunciation.sh
+RUN bash /tmp/install_pronunciation.sh && rm -rf /opt/venv/src \
+    && python -c "from nemo.collections.asr.models import ASRModel; from nemo.collections.tts.models import MagpieTTSModel; from patient_listener.app.server import create_app" \
+    && pip freeze --all > /opt/voice-installed.txt
+
+FROM python:3.12-slim-bookworm
+ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    NLTK_DATA=/opt/venv/nltk_data HOME=/home/listener XDG_CACHE_HOME=/cache \
+    HF_HOME=/cache/huggingface TORCH_HOME=/cache/torch NEMO_CACHE_DIR=/cache/nemo \
+    PL_HOST=0.0.0.0 PL_PORT=8001 PL_RELOAD=false PL_SERVICE_ROLE=voice \
+    VOICE_ENABLED=true AI_ENABLED=false NIGHTLY_ENABLED=false PATIENT_ENROLLMENT_REQUIRED=true
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential ca-certificates libsndfile1 ffmpeg espeak-ng libgomp1 libopenblas0-pthread \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 listener \
+    && useradd --uid 10001 --gid 10001 --create-home listener \
+    && mkdir -p /cache/huggingface /cache/torch /cache/nemo \
+    && chown -R 10001:10001 /cache
+COPY --from=build /opt/venv /opt/venv
+COPY --from=build /opt/voice-installed.txt /opt/voice-installed.txt
+WORKDIR /app
+USER 10001:10001
+EXPOSE 8001
+# Process health only; /healthz retains the application's readiness limitations.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15m CMD ["python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PL_PORT','8001')+'/livez',timeout=3).close()"]
+CMD ["python", "-m", "patient_listener.app"]

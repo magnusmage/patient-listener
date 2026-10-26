@@ -1,0 +1,6 @@
+# Known working GPU versions, not a complete transitive dependency lock.
+torch==2.9.1
+torchaudio==2.9.1
+torchvision==0.24.1
+nemo_toolkit==3.0.0
+pipecat-ai==1.12.0

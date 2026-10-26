@@ -14,3 +14,7 @@
 !deploy/websocket_probe.py
 !Dockerfile.api
 !Dockerfile.probe
+
+!Dockerfile.voice
+!deploy/voice-constraints.txt
+!deploy/Dockerfile.voice-runtime-fix

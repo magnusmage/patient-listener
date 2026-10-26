@@ -1,0 +1,8 @@
+# Local repair: reuse the already-built image without reinstalling Python/NeMo.
+FROM patient-listener-voice:local
+USER root
+# NeMo/Triton may compile host launchers at first inference, not just at build time.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && cc --version >/dev/null && g++ --version >/dev/null
+USER 10001:10001
