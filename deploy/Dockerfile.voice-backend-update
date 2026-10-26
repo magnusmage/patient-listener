@@ -1,0 +1,3 @@
+# Local incremental acceptance image; reuse the GPU stack already tested by the user.
+FROM patient-listener-voice:compiler-fix
+COPY src/patient_listener/ /opt/venv/lib/python3.12/site-packages/patient_listener/

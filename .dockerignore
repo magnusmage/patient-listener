@@ -18,3 +18,4 @@
 !Dockerfile.voice
 !deploy/voice-constraints.txt
 !deploy/Dockerfile.voice-runtime-fix
+!deploy/Dockerfile.voice-backend-update

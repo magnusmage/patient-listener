@@ -121,6 +121,33 @@ class PatienceController:
 
         return []
 
+    def next_silence_deadline(self, now: float) -> Optional[float]:
+        """Next eligible controller decision, on the injected monotonic clock.
+
+        The I/O adapter sleeps until this deadline rather than polling. Speech,
+        Stop and a new prompt cancel that sleep. None means no timed action is due.
+        This is a scheduling hint only: on_silence rechecks all rules at wake-up.
+        """
+        if self.silence_started is None or self.state in (
+            State.ENDED, State.SAFETY_STOP, State.SPEAKING, State.PRAISING,
+        ):
+            return None
+        start = self.silence_started
+        maximum = self.cfg.max_wait_s
+        if (maximum is not None and now >= start + maximum
+                and self.cfg.needs_complete_text and self.checked_complete):
+            return None  # A pending completeness decision must not spin/retry.
+        deadlines = []
+        if maximum is not None:
+            deadlines.append(start + maximum)
+        if (self.cfg.offer_hint_s is not None and self.target is not None
+                and self.state != State.HINT_OFFERED):
+            deadlines.append(start + self.cfg.offer_hint_s)
+        if (self.cfg.backchannel_s is not None and self.state == State.SILENT
+                and self.backchannels < self.cfg.max_backchannels_per_turn):
+            deadlines.append(start + self.cfg.backchannel_s)
+        return min(deadlines) if deadlines else None
+
     def on_complete(self, complete: bool, now: float) -> list[Action]:
         """Getting words out: Lightning's verdict on whether the transcript reads complete."""
         if complete:

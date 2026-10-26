@@ -32,8 +32,6 @@ __all__ = ["AppSession"]
 
 Sender = Callable[[dict], Awaitable[None]]
 
-# How often the silence ticker re-feeds the controller while the person is quiet.
-_TICK_S = 0.4
 # Primary-need preference order (a stable "profile" label for the frontend).
 _PROFILE_ORDER = (
     Need.FINDING_WORDS,
@@ -98,6 +96,8 @@ class AppSession:
         self.ended = False
         self.closing = False
         self._started = False
+        self._resting = False
+        self._rest_pending_prompt = False
         self._session_limit = self.cfg.max_session_min
         self._cap: Optional[asyncio.Task] = None
         self._t0 = 0.0
@@ -105,6 +105,7 @@ class AppSession:
         self._capture_ready = False
         self._loudness_skipped = False
         self._capture_settings = None
+        self._sleep = asyncio.sleep  # Injected by fake-clock scheduling tests.
         self._ticker: Optional[asyncio.Task] = None
         self._advance: Optional[asyncio.Task] = None
         self._engine_lock = asyncio.Lock()
@@ -159,6 +160,9 @@ class AppSession:
     async def _run_engine(self, event: tuple) -> list:
         if self.ended or self.closing:
             return []
+        if self._resting and event[0] != 'stop':
+            if event[0] not in ('typed', 'heard') or safetymod.check(event[1]) is None:
+                return []
         before = len(self.engine.replies)
         acts = await self._feed(event)
         if self.ended or self.closing:
@@ -191,7 +195,7 @@ class AppSession:
         await self._emit([{"type": "greeting", "text": greeting, "caption": greeting}])
         await self.next_prompt()
 
-    async def next_prompt(self) -> None:
+    async def next_prompt(self, *, resuming: bool = False) -> None:
         self._cancel_ticker()
         self._cancel_advance()
         if self.ended or self.closing:
@@ -206,15 +210,19 @@ class AppSession:
         item = self.plan_items.get(self.current.id) if self.current else None
         if item is not None:
             payload["text"] = item.prompt
-        acts = await self._feed(("prompt", self.current, payload["topic"], self.now()))
+        # An automatic rest has already reserved this turn and target. Resume it
+        # without incrementing the turn count or skipping the unpresented item.
+        acts = [] if resuming else await self._feed(("prompt", self.current, payload["topic"], self.now()))
         if self.ended or self.engine.controller.state == State.SAFETY_STOP:
             return
         if any(isinstance(a, Stop) for a in acts):
             await self._finish("turn_cap")
             return
         if any(isinstance(a, OfferRest) for a in acts):
+            self._resting = self._rest_pending_prompt = True
             await self._emit([{"type": "restOffer"}])
             return
+        self._resting = self._rest_pending_prompt = False
         await self._emit([{"type": "prompt", **payload}, self._state_event()])
 
     # --- inbound message dispatch ---------------------------------------------
@@ -270,10 +278,18 @@ class AppSession:
         elif name == "done":
             await self._run_engine(("done", self.now()))
         elif name == "rest":
-            await self._emit([{"type": "state", "state": "resting"}])
+            self._resting = True
+            self._cancel_ticker()
+            self._cancel_advance()
+            await self._emit([{"type": "state", "state": "resting", "replace_audio": True}])
         elif name == "resume":
-            self.idx += 1
-            await self.next_prompt()
+            if not self._resting:
+                return
+            pending = self._rest_pending_prompt
+            self._resting = False
+            if not pending:
+                self.idx += 1
+            await self.next_prompt(resuming=pending)
         elif name == "stop":
             await self.stop()
 
@@ -409,7 +425,7 @@ class AppSession:
     # --- patience clock (server-side silence ticker) --------------------------
 
     async def _pause(self) -> None:
-        if self.calibrating:
+        if self.calibrating or self._resting:
             return
         self._cancel_ticker()
         self._ticker = asyncio.create_task(self._tick())
@@ -418,9 +434,12 @@ class AppSession:
         try:
             if await self._silence_step():
                 return
-            while True:
-                await asyncio.sleep(_TICK_S)
-                if await self._silence_step():
+            while not self.ended and not self.closing:
+                deadline = self.engine.controller.next_silence_deadline(self.now())
+                if deadline is None:
+                    return
+                await self._sleep(max(0.0, deadline - self.now()))
+                if self.ended or self.closing or await self._silence_step():
                     return
         except asyncio.CancelledError:  # pragma: no cover - normal cancellation
             pass
@@ -445,7 +464,7 @@ class AppSession:
             self._schedule_advance(0.9)
 
     def _schedule_advance(self, delay: float) -> None:
-        if self.ended:
+        if self.ended or self._resting:
             return
         self._cancel_advance()
         self._advance = asyncio.create_task(self._do_advance(delay))
@@ -454,7 +473,7 @@ class AppSession:
         try:
             await asyncio.sleep(delay)
             await self._audio_idle.wait()
-            if self.ended:
+            if self.ended or self._resting:
                 return
             self.idx += 1
             await self.next_prompt()

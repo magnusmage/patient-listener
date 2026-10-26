@@ -23,6 +23,7 @@ class VoiceRuntime:
     gpu_lock: Any = field(default_factory=threading.Lock)
     fixed_clips: dict[str,bytes] = field(default_factory=dict)
     pipecat_version: str | None = None
+    warmup_passed: bool = False
 
     @classmethod
     def load(cls, settings: Settings) -> "VoiceRuntime":
@@ -51,6 +52,10 @@ class VoiceRuntime:
             count = prepare_fixed(runtime)
             logging.getLogger("uvicorn.error.patient_listener.voice").info(
                 "Prepared fixed audio clips count=%d", count)
+            from .voice_warmup import warm_up
+            runtime.warmup_passed = warm_up(runtime)
+            logging.getLogger("uvicorn.error.patient_listener.voice").info(
+                "Voice inference warm-up passed input_hz=16000 output_hz=22050")
             runtime.load_seconds = round(time.perf_counter() - started, 3)
             return runtime
         except BaseException:
@@ -65,6 +70,7 @@ class VoiceRuntime:
 
     def close(self) -> None:
         import torch
+        self.warmup_passed = False
         self.asr = None
         self.tts = None
         self.vad = None

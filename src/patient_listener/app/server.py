@@ -147,18 +147,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         voice_enabled = request.app.state.settings.voice_enabled
         pipeline_version = getattr(runtime, 'pipecat_version', None)
         pipeline_version = pipeline_version if isinstance(pipeline_version, str) else None
-        # Do not advertise production voice readiness merely because weights loaded.
+        # Strict True avoids truthy mocks/objects advertising a warm-up that never ran.
+        warmed = runtime is not None and getattr(runtime, 'warmup_passed', False) is True
+        ready = warmed and pipeline_version == '1.12.0'
+        # Operational readiness is not latency/accuracy/cloud acceptance evidence.
         return JSONResponse({
-            "status": "voice_development" if voice_enabled else "text_ready",
+            "status": ("voice_ready" if ready else "voice_development") if voice_enabled else "text_ready",
             "voice_enabled": voice_enabled,
             "service_role": request.app.state.settings.service_role,
             "remote_voice_configured": bool(request.app.state.settings.voice_public_ws_url),
             "models_loaded": runtime is not None,
-            "streaming_ready": False,
+            "streaming_ready": bool(voice_enabled and ready),
+            "warmup_passed": warmed,
+            "production_acceptance_verified": False,
             "pipeline_framework": "pipecat" if pipeline_version else None,
             "pipecat_version": pipeline_version,
             "development_voice_enabled": runtime is not None,
-        }, status_code=503 if voice_enabled else 200,
+        }, status_code=503 if voice_enabled and not ready else 200,
            headers={"Cache-Control": "no-store"})
 
     @app.get("/api/session")
