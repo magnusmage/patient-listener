@@ -97,6 +97,7 @@ class HttpsTransportTests(unittest.TestCase):
             headers={"X-PL-Device": "a" * 48, "X-Forwarded-Proto": "https"},
         )
         self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ws_url'].startswith('wss://'))
 
     def test_session_token_endpoint_does_not_trust_spoofable_headers_by_default(self):
         settings = Settings(environment="production", session_token_secret="unit-secret", require_https=True,

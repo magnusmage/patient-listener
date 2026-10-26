@@ -1,5 +1,7 @@
 # Submission readiness audit and three-day execution checklist
 
+> Current backend/cloud audit: [26 October 2026](BACKEND_DEPLOYMENT_AUDIT_2026-10-26.md). Older status tables below are historical.
+
 > **Historical snapshot:** for the current code/workbook review at `c928b1f`, see [Progress audit - 21 October 2026](PROGRESS_AUDIT_2026-10-21.md). Older gaps and next steps below may be superseded.
 
 **Audit date:** 21 October 2026, Asia/Karachi.  

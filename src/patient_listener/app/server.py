@@ -127,6 +127,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    @app.get("/livez")
+    async def live() -> JSONResponse:
+        # Process liveness only; no claim about voice quality or production acceptance.
+        return JSONResponse({"status": "alive"}, headers={"Cache-Control": "no-store"})
+
     @app.get("/healthz")
     async def health(request: Request) -> JSONResponse:
         runtime = request.app.state.voice_runtime
@@ -164,7 +169,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             token = state.signer.issue(pid, device)
         except ValueError:
             return JSONResponse({"error": "A valid device identifier is required"}, status_code=400)
-        scheme = "wss" if request.url.scheme == "https" else "ws"
+        secure = _is_secure(request.headers, request.url.scheme,
+                            trust_proxy_headers=state.settings.trust_proxy_headers)
+        scheme = "wss" if secure else "ws"
         host = request.headers.get("host", "localhost:8000")
         needs = sorted(n.value for n in state.store.person_needs(pid))
         return JSONResponse(

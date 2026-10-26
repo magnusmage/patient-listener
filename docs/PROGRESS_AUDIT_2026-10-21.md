@@ -1,5 +1,7 @@
 # Patient Listener: current progress audit
 
+> Current backend/cloud audit: [26 October 2026](BACKEND_DEPLOYMENT_AUDIT_2026-10-26.md). Older status tables below are historical.
+
 **Audit:** 21 October 2026, Asia/Karachi. **Code baseline:** `c928b1f` on local `main`.
 **Repository reviewed:** `C:/Users/Mage/Documents/Patient-Listener-V1`.
 **Requirement source:** `C:/Users/Mage/Downloads/Patient Listener Workbook v1.html`.

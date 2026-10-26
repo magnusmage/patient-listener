@@ -13,7 +13,8 @@ def main() -> None:
         factory=True,
         host=os.environ.get("PL_HOST", "127.0.0.1"),
         port=int(os.environ.get("PL_PORT", "8000")),
-        reload=bool(os.environ.get("PL_RELOAD")),
+        reload=os.environ.get("PL_RELOAD", "").strip().lower() in {"1", "true", "yes", "on"},
+        proxy_headers=False,  # App transport checks own explicitly trusted proxy headers.
     )
 
 

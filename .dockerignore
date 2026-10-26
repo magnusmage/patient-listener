@@ -1,0 +1,16 @@
+# Allowlist: secrets, databases, virtualenvs, reports and Git never enter the build.
+**
+!pyproject.toml
+!README.md
+!LICENSE
+!NOTICE
+!src/
+!src/**
+!web/
+!web/**
+!scripts/
+!scripts/install_english_pronunciation.sh
+!deploy/
+!deploy/websocket_probe.py
+!Dockerfile.api
+!Dockerfile.probe
