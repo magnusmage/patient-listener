@@ -30,6 +30,8 @@ from ..llm.factory import build_llm
 from .console_api import router as console_router
 from .agent_api import router as agent_router
 from .privacy_api import router as privacy_router
+from .patient_api import router as patient_router, COOKIE as PATIENT_COOKIE
+from ..store.patient_access import PatientAccess
 from .privacy_worker import purge_retained_consent
 from .deps import build_state
 from .session import AppSession
@@ -119,11 +121,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(console_router)
     app.include_router(agent_router)
     app.include_router(privacy_router)
+    app.include_router(patient_router)
 
     @app.middleware("http")
     async def private_api_no_cache(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith(("/api/console/", "/api/agent/")) or request.url.path == "/api/session":
+        if request.url.path.startswith(("/api/console/", "/api/agent/", "/api/patient/")) or request.url.path == "/api/session":
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -160,15 +163,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             return JSONResponse({"error": "HTTPS is required"}, status_code=400)
         pid = state.people.get(person, person)
-        if pid not in state.people.values() or not state.store.person_exists(pid):
-            return JSONResponse({"error": f"unknown person: {person}"}, status_code=404)
-        # Header is preferred for the HTTP request; query support keeps a plain browser client
-        # usable when it cannot attach a custom header. Neither value is logged or persisted.
         device = request.headers.get("x-pl-device", device)
+        authorization_id = None
         try:
-            token = state.signer.issue(pid, device)
+            if state.settings.requires_patient_enrollment:
+                authorization_id = PatientAccess(state.store).credential_authorization(
+                    pid,device,request.cookies.get(PATIENT_COOKIE,''))
+                if authorization_id is None:
+                    return JSONResponse({"error":"Device setup is required"},status_code=401)
+            if (not state.store.person_exists(pid) or
+                    (not state.settings.requires_patient_enrollment and pid not in state.people.values())):
+                return JSONResponse({"error":"Person not found"},status_code=404)
+            token = state.signer.issue(pid,device,authorization_id=authorization_id)
         except ValueError:
-            return JSONResponse({"error": "A valid device identifier is required"}, status_code=400)
+            return JSONResponse({"error":"A valid device identifier is required"},status_code=400)
         secure = _is_secure(request.headers, request.url.scheme,
                             trust_proxy_headers=state.settings.trust_proxy_headers)
         scheme = "wss" if secure else "ws"
@@ -198,6 +206,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             claims = state.signer.verify(token, device)
         except ValueError:
             await websocket.close(code=1008)  # policy violation: bad / expired token
+            return
+        if ((state.settings.requires_patient_enrollment or claims.authorization_id is not None)
+                and not PatientAccess(state.store).active(claims.person_id,device,claims.authorization_id)):
+            await websocket.close(code=1008)
             return
         if not state.store.person_exists(claims.person_id):
             await websocket.close(code=1008)

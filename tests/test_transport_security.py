@@ -92,9 +92,17 @@ class HttpsTransportTests(unittest.TestCase):
         self.assertEqual(response.json()["error"], "HTTPS is required")
 
     def test_session_token_endpoint_accepts_https_from_the_deployment_proxy(self):
+        from patient_listener.store.patient_access import PatientAccess
+        store = self.client.app.state.pl.store
+        store.set_console_user('transport-helper','Helper','therapist')
+        store.link_console_user('transport-helper','demo-margaret')
+        access = PatientAccess(store)
+        setup = access.create_invite('demo-margaret','transport-helper')['setup_code']
+        linked = access.redeem(setup,'a'*48)
         response = self.client.get(
             "/api/session",
-            headers={"X-PL-Device": "a" * 48, "X-Forwarded-Proto": "https"},
+            headers={"X-PL-Device": "a" * 48, "X-Forwarded-Proto": "https",
+                     "Cookie": "pl_patient_link="+linked["credential"]},
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['ws_url'].startswith('wss://'))

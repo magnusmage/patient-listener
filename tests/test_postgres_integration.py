@@ -143,6 +143,11 @@ class PostgresTests(unittest.TestCase):
             source.set_console_user('source-helper','Source helper','therapist')
             source.link_console_user('source-helper','demo-margaret')
             PrivacyStore(source).request_deletion('demo-margaret','source-helper')
+            from patient_listener.store.patient_access import PatientAccess
+            access=PatientAccess(source)
+            setup=access.create_invite('demo-margaret','source-helper')['setup_code']
+            access.redeem(setup,'a'*48)
+            access.create_invite('demo-margaret','source-helper')
             source.delete_all('demo-joseph')
             with self.assertRaises(ValueError):import_sqlite(path,URL)
             with self.store._db:
@@ -154,6 +159,8 @@ class PostgresTests(unittest.TestCase):
             self.assertTrue(self.store.person_deleted('demo-joseph'))
             self.assertNotIn('joseph',seed_all(self.store))
             self.assertEqual(self.store._db.execute('SELECT COUNT(*) FROM privacy_challenges').fetchone()[0],0)
+            for table in ('patient_devices','patient_invites'):
+                self.assertEqual(self.store._db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0)
             self.assertEqual(len(self.store.words('demo-margaret')),4)
             self.store.log_attempt(Attempt(session_id='new',word_id='w-leo',hint_level=HintLevel.NONE,
                 outcome=Outcome.FOUND,seconds_to_find=1,match_score=1,confirmed=True))
@@ -207,3 +214,36 @@ class PostgresTests(unittest.TestCase):
         self.assertTrue(self.store.person_exists('demo-margaret'))
         self.assertEqual(len(self.store.all_words('demo-margaret')), 4)
         self.assertTrue(privacy.confirm_deletion('demo-margaret', 'sam', token, person_confirmed=True)['deleted'])
+
+    def test_device_enrollment_is_single_use_and_revocation_is_shared(self):
+        from patient_listener.store.patient_access import PatientAccess
+        from patient_listener.store.postgres_store import PostgresStore
+        access=PatientAccess(self.store)
+        setup=access.create_invite('demo-margaret','sam')['setup_code']
+        other=PostgresStore(URL)
+        try:
+            def redeem(store):
+                try:return PatientAccess(store).redeem(setup,'a'*48)
+                except ValueError:return None
+            with ThreadPoolExecutor(2) as pool:
+                a=pool.submit(redeem,self.store);b=pool.submit(redeem,other)
+                results=[a.result(),b.result()]
+            self.assertEqual(sum(r is not None for r in results),1)
+            linked=next(r for r in results if r)
+            self.assertEqual(access.credential_authorization('demo-margaret','a'*48,linked['credential']),linked['authorization_id'])
+            PatientAccess(other).revoke('demo-margaret',linked['authorization_id'],'sam')
+            self.assertFalse(access.active('demo-margaret','a'*48,linked['authorization_id']))
+        finally:other.close()
+
+    def test_device_enrollment_failure_rolls_back_consumption(self):
+        from patient_listener.store.patient_access import PatientAccess
+        from unittest.mock import patch
+        access=PatientAccess(self.store)
+        setup=access.create_invite('demo-margaret','sam')['setup_code']
+        execute=self.store._db.execute
+        def fail(sql,params=()):
+            if sql.startswith('INSERT INTO patient_devices'):raise RuntimeError('synthetic failure')
+            return execute(sql,params)
+        with patch.object(self.store._db,'execute',side_effect=fail):
+            with self.assertRaises(RuntimeError):access.redeem(setup,'a'*48)
+        self.assertIsNotNone(access.redeem(setup,'a'*48))

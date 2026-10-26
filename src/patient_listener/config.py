@@ -75,6 +75,12 @@ class Settings:
     require_https: bool = field(default_factory=lambda: (_b("REQUIRE_HTTPS", os.environ.get("PL_ENV", "").lower() == "production")))
     trust_proxy_headers: bool = field(default_factory=lambda: (_b("TRUST_PROXY_HEADERS", False)))
     console_demo_enabled: bool = field(default_factory=lambda: (_b("CONSOLE_DEMO_ENABLED", False)))
+    patient_enrollment_required: bool = field(default_factory=lambda: _b("PATIENT_ENROLLMENT_REQUIRED", False))
+
+    @property
+    def requires_patient_enrollment(self) -> bool:
+        return self.environment == "production" or self.patient_enrollment_required
+
     telegram_bot_token: str = field(default_factory=lambda: (os.environ.get("TELEGRAM_BOT_TOKEN", "")), repr=False)  # sandbox only
     phoenix_collector_endpoint: str = field(default_factory=lambda: (os.environ.get(
         "PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006"

@@ -45,7 +45,8 @@ docker run --rm --name patient-listener-api-check -p 127.0.0.1:18000:8000 patien
 ```
 
 Check http://127.0.0.1:18000/livez and /healthz. This is a local text/API check,
-not a public production configuration and not a voice endpoint. Do not attach
+not a public production configuration and not a voice endpoint. Device enrollment
+is required by default in this CPU image; an unlinked session request should be HTTP401. Do not attach
 production credentials or use its default in-memory store for actual records.
 
 ## G-02 echo probe before GPU provisioning
@@ -82,7 +83,7 @@ Also test the actual browser socket route after the final authentication layout 
 
 ## Production configuration gates
 
-1. Use a migrated PostgreSQL DATABASE_URL, schema 0003, with verified TLS. Do not
+1. Use a migrated PostgreSQL DATABASE_URL, schema 0004, with verified TLS. Do not
    rely on endpoint-local SQLite: endpoint disks are removed on stop/delete.
    Remove PL_DB_PATH and run tools.database upgrade as an operator migration step,
    not concurrently from every replica. Database backups and deletion retention
@@ -90,7 +91,9 @@ Also test the actual browser socket route after the final authentication layout 
 2. Set PL_ENV=production, REQUIRE_HTTPS=true, a stable private SESSION_TOKEN_SECRET,
    SESSION_TOKEN_TTL_S=900, and PL_RELOAD=false. Configure TRUST_PROXY_HEADERS=true
    only if ingress removes forged forwarded headers and direct container access is
-   blocked. Keep the browser on a verified HTTPS origin; TLS/proxy behavior needs
+   blocked. Patient enrollment is now mandatory in production; wire the one-time
+   setup flow documented in PATIENT_DEVICE_ENROLLMENT.md before patient use.
+   Keep the browser on a verified HTTPS origin; TLS/proxy behavior needs
    an actual ingress test. No built-in production identity provider exists yet.
 3. Keep one process/replica and no autoscaling until distributed session/GPU leases
    and deletion/generation coordination are implemented. Separate endpoints with

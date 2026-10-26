@@ -8,7 +8,7 @@ import asyncio
 import threading
 from .sqlite_store import SqlStore
 
-REVISION='0003'
+REVISION='0004'
 # Serialize explicit write/check sequences across workers, as SQLite's writer lock did.
 _WRITE_LOCK=72419031001
 

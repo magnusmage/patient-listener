@@ -138,3 +138,18 @@ No paid model requests, model downloads, production data changes, commits or pus
 The CPU container deliberately does not claim voice readiness. The public deployment
 must remain gated by actual authentication, privacy, warm-up and ingress verification.
 See SERVERLESS_PREPARATION.md for operator commands and cloud-only evidence needed.
+
+
+## Follow-up: patient device authorization
+
+Container/probe/audit groundwork was committed locally as 60014b0, with no push.
+The user then authorized the patient authorization issue. Production now requires
+helper-issued single-use device enrollment, an HttpOnly cookie bound to a hashed
+device ID, and a signed live authorization ID at WebSocket admission. Relinking or
+revoking a device blocks new connections and renewal using its old tokens.
+SQLite/PostgreSQL schema is now 0004; transfer excludes device credentials; privacy
+deletion removes them. Development demo compatibility remains explicitly local.
+See PATIENT_DEVICE_ENROLLMENT.md. MFA, frontend enrollment and judge isolation,
+distributed leases and other requirements above remain open. Earlier paragraphs
+about unrestricted production session issuance describe the baseline before this fix.
+This follow-up is not committed or pushed at this checkpoint.

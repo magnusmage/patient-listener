@@ -175,6 +175,7 @@ class PrivacyStore:
         counts={}
         for table in ('words','attempts','cards','plans','consents','hint_audio','nightly_runs',
                       'agent_credentials','agent_tool_requests','person_settings','privacy_challenges',
+                      'patient_invites','patient_devices',
                       'console_links','people'):
             column='id' if table=='people' else 'person_id'
             counts[table]=self.db.execute(f'DELETE FROM {table} WHERE {column}=?',(pid,)).rowcount
@@ -225,6 +226,8 @@ class PrivacyStore:
                 cutoff=instant.replace(year=instant.year-2,day=28).isoformat()
             audit_count=self.db.execute('DELETE FROM audit WHERE at<=?',(cutoff,)).rowcount
             self.db.execute('DELETE FROM privacy_challenges WHERE expires_at<=?',(now,))
+            self.db.execute('DELETE FROM patient_invites WHERE expires_at<=?',(now,))
+            self.db.execute('DELETE FROM patient_devices WHERE expires_at<=?',(now,))
             self.db.commit()
             return {'consent_events_deleted':count,'audit_events_deleted':audit_count}
         except BaseException:

@@ -29,6 +29,7 @@ class SessionToken:
     person_id: str
     expires_at: float
     device_hash: str
+    authorization_id: str | None = None
 
 
 def validate_device_id(device_id: str) -> str:
@@ -66,21 +67,34 @@ class TokenSigner:
         mac = hmac.new(self._secret, payload.encode("utf-8"), hashlib.sha256).digest()
         return _b64(mac)
 
-    def issue(self, person_id: str, device_id: str, now: float | None = None) -> str:
+    def issue(self, person_id: str, device_id: str, now: float | None = None, *, authorization_id: str | None = None) -> str:
         """Mint a token for ``person_id`` valid for ``ttl_s`` seconds."""
         now = time.time() if now is None else now
         expiry = int(now + self.ttl_s)
         payload = f"{_b64(person_id.encode('utf-8'))}.{expiry}.{_device_hash(device_id)}"
+        if authorization_id is not None:
+            if not authorization_id or not all(c.isascii() and (c.isalnum() or c in "_-") for c in authorization_id):
+                raise ValueError("invalid authorization")
+            payload += "."+authorization_id
         return f"{payload}.{self._sign(payload)}"
 
     def verify(self, token: str, device_id: str, now: float | None = None) -> SessionToken:
         """Return the :class:`SessionToken` or raise ``ValueError`` if invalid or expired."""
         now = time.time() if now is None else now
         try:
-            pid_b64, expiry_s, token_device_hash, sig = token.split(".")
+            parts = token.split(".")
+            if len(parts) == 4:
+                pid_b64, expiry_s, token_device_hash, sig = parts
+                authorization_id = None
+            elif len(parts) == 5:
+                pid_b64, expiry_s, token_device_hash, authorization_id, sig = parts
+            else:
+                raise ValueError("malformed token")
         except ValueError as exc:  # wrong shape
             raise ValueError("malformed token") from exc
         payload = f"{pid_b64}.{expiry_s}.{token_device_hash}"
+        if authorization_id is not None:
+            payload += "."+authorization_id
         if not hmac.compare_digest(sig, self._sign(payload)):
             raise ValueError("bad signature")
         if not hmac.compare_digest(token_device_hash, _device_hash(device_id)):
@@ -93,5 +107,5 @@ class TokenSigner:
             raise ValueError("expired")
         return SessionToken(
             person_id=_unb64(pid_b64).decode("utf-8"), expires_at=float(expiry),
-            device_hash=token_device_hash,
+            device_hash=token_device_hash, authorization_id=authorization_id,
         )
