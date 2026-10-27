@@ -43,6 +43,14 @@
     .con-input { width: 100%; padding: 13px 16px; border: 1px solid var(--pl-line-strong); border-radius: 12px; font-size: 16px; background: var(--pl-surface); color: var(--pl-text); margin-bottom: 10px; }
     .con-addrow { display: flex; gap: 10px; align-items: center; }
     .con-addrow .con-input { margin-bottom: 0; flex: 1; }
+    /* Plan-generation form: compact, console-sized controls in a constrained width. */
+    .con-planform { max-width: 440px; margin: 4px 0 16px; display: flex; flex-direction: column; gap: 10px; }
+    .con-planrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; border: 1px solid var(--pl-line); border-radius: 12px; }
+    .con-planrow > span { font-size: 15px; font-weight: 600; }
+    .con-planrow .con-input { width: 72px; margin-bottom: 0; text-align: center; padding: 9px 10px; }
+    .con-toggle { display: inline-flex; gap: 6px; }
+    .con-toggle button { min-height: 40px; padding: 0 18px; border: 2px solid var(--pl-line-strong); border-radius: 10px; background: var(--pl-surface); color: var(--pl-text); font: 600 15px var(--pl-font); cursor: pointer; }
+    .con-toggle button[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); }
     .con-alert { background: var(--pl-danger-bg); border: 1px solid var(--pl-danger); color: var(--pl-danger); border-radius: 12px; padding: 12px 16px; font-size: 15px; margin: 0 0 14px; }
     .con-notice { background: var(--pl-good-bg); border: 1px solid var(--pl-primary); color: var(--pl-primary); border-radius: 12px; padding: 12px 16px; font-size: 15px; margin: 0 0 14px; font-weight: 600; }
     .con-sign { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
@@ -287,14 +295,13 @@
     const pf = S.planForm;
     const aiPill = (label, active, val) => h('button', { 'aria-pressed': String(active), disabled: S.busy ? '' : null, onclick: () => { pf.use_ai = val; render(); } }, label);
     card.append(
-      h('div', { class: 'pl-setting' },
-        h('div', { class: 'pl-setting__row' },
+      h('div', { class: 'con-planform' },
+        h('div', { class: 'con-planrow' },
           h('span', {}, 'How many words (1–4)'),
-          h('input', { id: 'plan-max-words', class: 'con-input', type: 'number', min: '1', max: '4', step: '1', value: String(pf.max_words), style: 'width:92px;margin-bottom:0', 'aria-label': 'Maximum words, 1 to 4', oninput: e => { pf.max_words = e.target.value; } }))),
-      h('div', { class: 'pl-setting' },
-        h('div', { class: 'pl-setting__row' },
+          h('input', { id: 'plan-max-words', class: 'con-input', type: 'number', min: '1', max: '4', step: '1', value: String(pf.max_words), 'aria-label': 'Maximum words, 1 to 4', oninput: e => { pf.max_words = e.target.value; } })),
+        h('div', { class: 'con-planrow' },
           h('span', {}, 'Use AI for hint wording'),
-          h('span', { class: 'pl-pill' }, aiPill('Off', !pf.use_ai, false), aiPill('On', pf.use_ai, true)))));
+          h('span', { class: 'con-toggle' }, aiPill('Off', !pf.use_ai, false), aiPill('On', pf.use_ai, true)))));
     card.append(h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: generatePlan }, S.busyAction === 'plan' ? 'Generating…' : 'Generate plan'));
     const n = DATA.nightly[S.person];
     if (n === undefined) { loadNightly().then(render); }
