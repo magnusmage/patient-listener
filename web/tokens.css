@@ -1,35 +1,37 @@
-/* Patient Listener — design tokens (workbook: Design system -> Tokens).
-   The ONLY place raw colour values appear. Every text pair is >= 7:1 (AAA), edges >= 3:1.
-   Colour never carries meaning alone (DS-A05). Profiles change behaviour, never colours. */
+/* Patient Listener — design tokens (Design Plan v0.1 — design system).
+   The ONLY place raw colour values appear. Pine-green brand, calm neutral grounds, one
+   typeface (Lexend), a dark theme and a distinct safety theme. Colour never carries meaning
+   alone (DS-A05). Profiles change behaviour, never colours. */
 
-@font-face {
-  /* Self-hosted Atkinson Hyperlegible Next (OFL). Drop the files in web/fonts/ on deploy;
-     the fallback stack keeps the app legible and correctly sized until then. */
-  font-family: "Atkinson Hyperlegible Next";
-  src: local("Atkinson Hyperlegible Next"), local("Atkinson Hyperlegible");
-  font-display: swap;
-}
+/* Lexend is loaded via <link> in each page head (Google Fonts). The fallback stack keeps the
+   app legible and correctly sized when offline. Swap in the exact licensed face here if there
+   is one; Lexend is the specified fallback in the plan. */
 
 :root {
   /* --- Colour: light (default) --- */
-  --pl-page: #F4F7F6;
-  --pl-surface: #FFFFFF;
-  --pl-text: #11201E;
-  --pl-muted: #3F524E;          /* secondary labels only, never a prompt */
-  --pl-primary: #0B5F58;
+  --pl-page: #F2F4F2;           /* ground */
+  --pl-surface: #FFFFFF;        /* surface / cue card */
+  --pl-text: #10201B;           /* ink */
+  --pl-muted: #5C6A63;          /* muted ink — secondary labels only, never a prompt */
+  --pl-primary: #15574A;        /* pine green — primary */
   --pl-on-primary: #FFFFFF;
   --pl-good: #145A2F;
   --pl-good-bg: #E3F2E8;
   --pl-warn: #6A3F00;
   --pl-warn-bg: #FBEFD9;
-  --pl-danger: #8A1A1F;         /* safety card only, never a wrong word */
-  --pl-danger-bg: #F8E1E1;
-  --pl-line: #6B7F7B;
-  --pl-caption-bg: #E8EFEE;
+  --pl-danger: #96222A;         /* emergency red — safety card only, never a wrong word */
+  --pl-danger-bg: #F8E3E1;      /* blush ground */
+  --pl-line: #D7DDD9;           /* card / tile edges (decorative) */
+  --pl-line-strong: #CDD4CF;    /* control outlines where more definition helps */
+  --pl-tile: #E7EDEA;           /* icon tile / surface2 */
+  --pl-caption-bg: #EEF2F0;     /* caption / "You" panel (--cap) */
+  --pl-hint-bg: #FBF4E4;        /* amber hint card */
+  --pl-hint-line: #ECDCB6;      /* amber hint border */
+  --pl-hint-ink: #4A3C18;       /* amber hint text */
+  --pl-hint-banner: #8A6D33;    /* amber hint banner */
 
-  /* --- Type: one family (Atkinson Hyperlegible Next, OFL) --- */
-  --pl-font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui,
-             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* --- Type: one family (Lexend) --- */
+  --pl-font: "Lexend", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --pl-text-prompt-size: 36px;  --pl-text-prompt-lh: 1.25;  --pl-text-prompt-wt: 700;
   --pl-text-hint-size: 40px;    --pl-text-hint-lh: 1.2;     --pl-text-hint-wt: 700;
   --pl-text-caption-size: 28px; --pl-text-caption-lh: 1.3;  --pl-text-caption-wt: 400;
@@ -49,8 +51,10 @@
   --pl-target: 64px;            /* patient app min touch target */
   --pl-target-console: 44px;    /* console min target */
   --pl-gap-target: 16px;        /* min gap between targets */
-  --pl-radius-card: 16px;
-  --pl-radius-button: 999px;
+  --pl-radius-card: 16px;       /* cards */
+  --pl-radius-tile: 12px;       /* icon tiles */
+  --pl-radius-input: 12px;      /* inputs */
+  --pl-radius-button: 999px;    /* pills (stadium) */
   --pl-button-height: 72px;
   --pl-content-max: 720px;
 
@@ -68,37 +72,49 @@
 /* --- Colour: dark (system preference), unless the person forced light --- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --pl-page: #0F1716;
-    --pl-surface: #16211F;
-    --pl-text: #E6EEEC;
-    --pl-muted: #B3C4C0;
-    --pl-primary: #6FD0C4;
-    --pl-on-primary: #0B1312;
+    --pl-page: #0E1512;
+    --pl-surface: #162019;
+    --pl-text: #EAF0ED;
+    --pl-muted: #9FB0A8;
+    --pl-primary: #7FD9C4;        /* mint action — bright on near-black */
+    --pl-on-primary: #0E1512;
     --pl-good: #9FE3B5;
     --pl-good-bg: #123322;
     --pl-warn: #F2CE8A;
     --pl-warn-bg: #3A2A05;
     --pl-danger: #F3B0B2;
     --pl-danger-bg: #3A1012;
-    --pl-line: #4A5C58;
-    --pl-caption-bg: #12201D;
+    --pl-line: #2A332E;
+    --pl-line-strong: #3A463F;
+    --pl-tile: #1D2A23;
+    --pl-caption-bg: #17241D;
+    --pl-hint-bg: #2A2410;
+    --pl-hint-line: #4A4020;
+    --pl-hint-ink: #F2E4BE;
+    --pl-hint-banner: #D8BE7E;
   }
 }
 
 /* --- Colour: dark, forced by the theme toggle --- */
 :root[data-theme="dark"] {
-  --pl-page: #0F1716;
-  --pl-surface: #16211F;
-  --pl-text: #E6EEEC;
-  --pl-muted: #B3C4C0;
-  --pl-primary: #6FD0C4;
-  --pl-on-primary: #0B1312;
+  --pl-page: #0E1512;
+  --pl-surface: #162019;
+  --pl-text: #EAF0ED;
+  --pl-muted: #9FB0A8;
+  --pl-primary: #7FD9C4;
+  --pl-on-primary: #0E1512;
   --pl-good: #9FE3B5;
   --pl-good-bg: #123322;
   --pl-warn: #F2CE8A;
   --pl-warn-bg: #3A2A05;
   --pl-danger: #F3B0B2;
   --pl-danger-bg: #3A1012;
-  --pl-line: #4A5C58;
-  --pl-caption-bg: #12201D;
+  --pl-line: #2A332E;
+  --pl-line-strong: #3A463F;
+  --pl-tile: #1D2A23;
+  --pl-caption-bg: #17241D;
+  --pl-hint-bg: #2A2410;
+  --pl-hint-line: #4A4020;
+  --pl-hint-ink: #F2E4BE;
+  --pl-hint-banner: #D8BE7E;
 }

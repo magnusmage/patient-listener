@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Patient Listener — design system specimen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="app.css" />
 </head>
@@ -11,7 +14,7 @@
   <button class="pl-tab pl-theme-toggle" id="theme">🌗 theme</button>
   <div class="pl-specimen">
     <h1 class="pl-prompt">Design system</h1>
-    <p class="pl-muted">Every component in every state. Atkinson Hyperlegible Next, 7:1 text contrast, 64&nbsp;px targets, no countdowns. Toggle the theme, top&nbsp;right, and zoom to 200%.</p>
+    <p class="pl-muted">Every component in every state. Lexend, pine-green brand, strong contrast, 64&nbsp;px targets, no countdowns. Toggle the theme, top&nbsp;right, and zoom to 200%.</p>
 
     <section>
       <h2>Colour tokens</h2>
@@ -43,6 +46,15 @@
         <div class="pl-ring" data-mode="listening">Listening</div>
         <div class="pl-ring" data-mode="speaking">Speaking</div>
         <div class="pl-ring" data-mode="resting">Resting</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>State chip (a word + a dot — never colour alone)</h2>
+      <div class="pl-btn-row">
+        <span class="pl-chip" data-mode="listening"><span class="pl-chip__dot" aria-hidden="true"></span>Listening — no rush</span>
+        <span class="pl-chip" data-mode="speaking"><span class="pl-chip__dot" aria-hidden="true"></span>Speaking</span>
+        <span class="pl-chip" data-mode="resting"><span class="pl-chip__dot" aria-hidden="true"></span>Resting</span>
       </div>
     </section>
 
@@ -93,8 +105,8 @@
     <section>
       <h2>Need cards (P0)</h2>
       <div class="pl-needs" style="max-width:640px">
-        <button class="pl-need" aria-pressed="true"><span class="pl-need__check">✓</span><span><span class="pl-need__title">Finding the word</span><br><span class="pl-need__desc">I will wait, and help only if you ask.</span></span></button>
-        <button class="pl-need" aria-pressed="false"><span class="pl-need__check">○</span><span><span class="pl-need__title">Getting words started</span><br><span class="pl-need__desc">I will stay quiet and never rush you.</span></span></button>
+        <button class="pl-need" aria-pressed="true"><span class="pl-need__tile" aria-hidden="true">💭</span><span class="pl-need__body"><span class="pl-need__title">Finding the word</span><span class="pl-need__desc">I will wait, and help only if you ask.</span></span><span class="pl-need__sel" aria-hidden="true">✓</span></button>
+        <button class="pl-need" aria-pressed="false"><span class="pl-need__tile" aria-hidden="true">💬</span><span class="pl-need__body"><span class="pl-need__title">Getting words started</span><span class="pl-need__desc">I will stay quiet and never rush you.</span></span><span class="pl-need__sel" aria-hidden="true">✓</span></button>
       </div>
     </section>
 

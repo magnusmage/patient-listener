@@ -7,40 +7,42 @@
 <title>Patient Listener — demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* Patient Listener — design tokens (workbook: Design system -> Tokens).
-   The ONLY place raw colour values appear. Every text pair is >= 7:1 (AAA), edges >= 3:1.
-   Colour never carries meaning alone (DS-A05). Profiles change behaviour, never colours. */
+/* Patient Listener — design tokens (Design Plan v0.1 — design system).
+   The ONLY place raw colour values appear. Pine-green brand, calm neutral grounds, one
+   typeface (Lexend), a dark theme and a distinct safety theme. Colour never carries meaning
+   alone (DS-A05). Profiles change behaviour, never colours. */
 
-@font-face {
-  /* Self-hosted Atkinson Hyperlegible Next (OFL). Drop the files in web/fonts/ on deploy;
-     the fallback stack keeps the app legible and correctly sized until then. */
-  font-family: "Atkinson Hyperlegible Next";
-  src: local("Atkinson Hyperlegible Next"), local("Atkinson Hyperlegible");
-  font-display: swap;
-}
+/* Lexend is loaded via <link> in each page head (Google Fonts). The fallback stack keeps the
+   app legible and correctly sized when offline. Swap in the exact licensed face here if there
+   is one; Lexend is the specified fallback in the plan. */
 
 :root {
   /* --- Colour: light (default) --- */
-  --pl-page: #F4F7F6;
-  --pl-surface: #FFFFFF;
-  --pl-text: #11201E;
-  --pl-muted: #3F524E;          /* secondary labels only, never a prompt */
-  --pl-primary: #0B5F58;
+  --pl-page: #F2F4F2;           /* ground */
+  --pl-surface: #FFFFFF;        /* surface / cue card */
+  --pl-text: #10201B;           /* ink */
+  --pl-muted: #5C6A63;          /* muted ink — secondary labels only, never a prompt */
+  --pl-primary: #15574A;        /* pine green — primary */
   --pl-on-primary: #FFFFFF;
   --pl-good: #145A2F;
   --pl-good-bg: #E3F2E8;
   --pl-warn: #6A3F00;
   --pl-warn-bg: #FBEFD9;
-  --pl-danger: #8A1A1F;         /* safety card only, never a wrong word */
-  --pl-danger-bg: #F8E1E1;
-  --pl-line: #6B7F7B;
-  --pl-caption-bg: #E8EFEE;
+  --pl-danger: #96222A;         /* emergency red — safety card only, never a wrong word */
+  --pl-danger-bg: #F8E3E1;      /* blush ground */
+  --pl-line: #D7DDD9;           /* card / tile edges (decorative) */
+  --pl-line-strong: #CDD4CF;    /* control outlines where more definition helps */
+  --pl-tile: #E7EDEA;           /* icon tile / surface2 */
+  --pl-caption-bg: #EEF2F0;     /* caption / "You" panel (--cap) */
+  --pl-hint-bg: #FBF4E4;        /* amber hint card */
+  --pl-hint-line: #ECDCB6;      /* amber hint border */
+  --pl-hint-ink: #4A3C18;       /* amber hint text */
+  --pl-hint-banner: #8A6D33;    /* amber hint banner */
 
-  /* --- Type: one family (Atkinson Hyperlegible Next, OFL) --- */
-  --pl-font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui,
-             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* --- Type: one family (Lexend) --- */
+  --pl-font: "Lexend", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --pl-text-prompt-size: 36px;  --pl-text-prompt-lh: 1.25;  --pl-text-prompt-wt: 700;
   --pl-text-hint-size: 40px;    --pl-text-hint-lh: 1.2;     --pl-text-hint-wt: 700;
   --pl-text-caption-size: 28px; --pl-text-caption-lh: 1.3;  --pl-text-caption-wt: 400;
@@ -60,8 +62,10 @@
   --pl-target: 64px;            /* patient app min touch target */
   --pl-target-console: 44px;    /* console min target */
   --pl-gap-target: 16px;        /* min gap between targets */
-  --pl-radius-card: 16px;
-  --pl-radius-button: 999px;
+  --pl-radius-card: 16px;       /* cards */
+  --pl-radius-tile: 12px;       /* icon tiles */
+  --pl-radius-input: 12px;      /* inputs */
+  --pl-radius-button: 999px;    /* pills (stadium) */
   --pl-button-height: 72px;
   --pl-content-max: 720px;
 
@@ -79,39 +83,51 @@
 /* --- Colour: dark (system preference), unless the person forced light --- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --pl-page: #0F1716;
-    --pl-surface: #16211F;
-    --pl-text: #E6EEEC;
-    --pl-muted: #B3C4C0;
-    --pl-primary: #6FD0C4;
-    --pl-on-primary: #0B1312;
+    --pl-page: #0E1512;
+    --pl-surface: #162019;
+    --pl-text: #EAF0ED;
+    --pl-muted: #9FB0A8;
+    --pl-primary: #7FD9C4;        /* mint action — bright on near-black */
+    --pl-on-primary: #0E1512;
     --pl-good: #9FE3B5;
     --pl-good-bg: #123322;
     --pl-warn: #F2CE8A;
     --pl-warn-bg: #3A2A05;
     --pl-danger: #F3B0B2;
     --pl-danger-bg: #3A1012;
-    --pl-line: #4A5C58;
-    --pl-caption-bg: #12201D;
+    --pl-line: #2A332E;
+    --pl-line-strong: #3A463F;
+    --pl-tile: #1D2A23;
+    --pl-caption-bg: #17241D;
+    --pl-hint-bg: #2A2410;
+    --pl-hint-line: #4A4020;
+    --pl-hint-ink: #F2E4BE;
+    --pl-hint-banner: #D8BE7E;
   }
 }
 
 /* --- Colour: dark, forced by the theme toggle --- */
 :root[data-theme="dark"] {
-  --pl-page: #0F1716;
-  --pl-surface: #16211F;
-  --pl-text: #E6EEEC;
-  --pl-muted: #B3C4C0;
-  --pl-primary: #6FD0C4;
-  --pl-on-primary: #0B1312;
+  --pl-page: #0E1512;
+  --pl-surface: #162019;
+  --pl-text: #EAF0ED;
+  --pl-muted: #9FB0A8;
+  --pl-primary: #7FD9C4;
+  --pl-on-primary: #0E1512;
   --pl-good: #9FE3B5;
   --pl-good-bg: #123322;
   --pl-warn: #F2CE8A;
   --pl-warn-bg: #3A2A05;
   --pl-danger: #F3B0B2;
   --pl-danger-bg: #3A1012;
-  --pl-line: #4A5C58;
-  --pl-caption-bg: #12201D;
+  --pl-line: #2A332E;
+  --pl-line-strong: #3A463F;
+  --pl-tile: #1D2A23;
+  --pl-caption-bg: #17241D;
+  --pl-hint-bg: #2A2410;
+  --pl-hint-line: #4A4020;
+  --pl-hint-ink: #F2E4BE;
+  --pl-hint-banner: #D8BE7E;
 }
 
 /* Patient Listener — components & screens. Uses only tokens.css for colour/type/space.
@@ -139,10 +155,10 @@ html, body {
   margin: 0 auto;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: var(--pl-space-3);
+  padding: var(--pl-space-2) var(--pl-space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--pl-space-3);
+  gap: var(--pl-space-2);
 }
 
 img, svg, canvas { max-width: 100%; height: auto; }
@@ -182,6 +198,14 @@ img, svg, canvas { max-width: 100%; height: auto; }
   font-size: var(--pl-text-body-size);
   display: flex; align-items: center; gap: var(--pl-space-1);
 }
+.pl-link {                     /* pine-green, bold, underlined (e.g. "a carer can help") */
+  color: var(--pl-primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font-family: var(--pl-font); font-size: inherit;
+}
 
 /* --- Buttons: min 64px, big radius, 72px tall for primary --- */
 .pl-btn {
@@ -195,6 +219,7 @@ img, svg, canvas { max-width: 100%; height: auto; }
   border-radius: var(--pl-radius-button);
   border: 3px solid transparent;
   cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   transition: background var(--pl-motion) ease, color var(--pl-motion) ease;
 }
 .pl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -211,21 +236,30 @@ img, svg, canvas { max-width: 100%; height: auto; }
 }
 .pl-btn--big { height: var(--pl-button-height); font-size: 30px; }
 .pl-btn-row { display: flex; gap: var(--pl-gap-target); flex-wrap: wrap; }
+.pl-btn-row .pl-btn { flex: 1; }
+/* Inline SVG icons carried on buttons/cards scale with the text. */
+.pl-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.pl-icon svg { display: block; }
 
-/* --- Top bar: title + Stop (Stop is the one exception to one-action-per-screen) --- */
+/* --- Session top bar: "AI practice partner · <need>" + a Stop pill (prototype) --- */
 .pl-topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--pl-space-2);
+  background: var(--pl-surface); border-bottom: 1px solid var(--pl-line);
+  margin: calc(-1 * var(--pl-space-3)) calc(-1 * var(--pl-space-3)) 0;
+  padding: var(--pl-space-2) var(--pl-space-3);
 }
-.pl-topbar__title { font-weight: 700; font-size: 22px; }
+.pl-topbar__title { color: var(--pl-muted); font-weight: 600; font-size: 16px; }
 .pl-stop {
+  display: inline-flex; align-items: center; gap: 8px;
   background: var(--pl-surface);
-  color: var(--pl-danger);
-  border: 3px solid var(--pl-danger);
+  color: var(--pl-text);
+  border: 2px solid var(--pl-line-strong);
   border-radius: var(--pl-radius-button);
-  min-height: var(--pl-target); padding: 0 var(--pl-space-3);
-  font-weight: 700; font-size: var(--pl-text-button-size); cursor: pointer;
+  min-height: var(--pl-target-console); padding: 9px var(--pl-space-3);
+  font-weight: 600; font-size: 16px; cursor: pointer;
 }
+.pl-stop svg { display: block; }
 
 /* --- Screen scaffold --- */
 .pl-screen { display: flex; flex-direction: column; gap: var(--pl-space-3); flex: 1; }
@@ -234,38 +268,44 @@ img, svg, canvas { max-width: 100%; height: auto; }
   background: var(--pl-surface);
   border: 1px solid var(--pl-line);
   border-radius: var(--pl-radius-card);
-  padding: var(--pl-space-3);
+  padding: 18px 20px;
 }
 .pl-photo {
-  width: 100%; aspect-ratio: 4 / 3; border-radius: var(--pl-radius-card);
-  background: var(--pl-caption-bg);
+  width: 100%; aspect-ratio: 16 / 10; max-height: 26vh; border-radius: var(--pl-radius-card);
+  background: var(--pl-tile); border: 4px solid var(--pl-primary);
   display: flex; align-items: center; justify-content: center;
-  color: var(--pl-muted); font-size: 20px; overflow: hidden;
+  color: var(--pl-muted); font-size: 44px; overflow: hidden;
 }
 
-/* --- Listening ring: STATIC. No pulse, no countdown (DS-T01). Dashed while speaking. --- */
+/* --- Mic circle (first-use / mic check): pine ring, calm --- */
 .pl-ring {
-  width: 160px; height: 160px; border-radius: 50%;
-  border: 10px solid var(--pl-primary);
+  width: 92px; height: 92px; border-radius: 50%;
+  border: 3px solid var(--pl-primary); background: var(--pl-surface);
   margin: var(--pl-space-2) auto;
   display: flex; align-items: center; justify-content: center;
-  color: var(--pl-muted); font-size: 20px; text-align: center; padding: var(--pl-space-2);
+  color: var(--pl-primary); font-size: 34px; text-align: center;
 }
-.pl-ring[data-mode="speaking"] { border-style: dashed; }
-.pl-ring[data-mode="resting"] { border-color: var(--pl-line); }
+.pl-ring[data-mode="resting"] { border-color: var(--pl-line-strong); color: var(--pl-muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .pl-ring[data-mode="listening"] { animation: pl-breathe 2.4s ease-in-out infinite; }
+}
+@keyframes pl-breathe { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.06);opacity:.8} }
 
 /* --- Captions: fixed height so the layout never shifts when a line arrives (DS-T06) --- */
 .pl-captions {
   background: var(--pl-caption-bg);
-  border-radius: var(--pl-radius-card);
-  padding: var(--pl-space-2);
-  min-height: 120px;
+  border: 1px solid var(--pl-line);
+  border-radius: 18px;
+  padding: 16px 18px;
+  min-height: 84px;
   font-size: var(--pl-text-caption-size);
   line-height: var(--pl-text-caption-lh);
-  display: flex; flex-direction: column; gap: var(--pl-space-1); justify-content: flex-end;
+  display: flex; flex-direction: column; gap: var(--pl-space-2); justify-content: flex-end;
 }
-.pl-caption__who { color: var(--pl-muted); font-size: 18px; }
-.pl-caption__line--you { color: var(--pl-text); }
+.pl-caption__who {
+  display: block; color: var(--pl-muted); font-size: 16px; font-weight: 500; margin-bottom: 4px;
+}
+.pl-caption__line--you { color: var(--pl-text); font-weight: 600; }
 .pl-caption__line--listener { color: var(--pl-primary); font-weight: 700; }
 
 /* --- Type-to-talk input --- */
@@ -274,76 +314,108 @@ img, svg, canvas { max-width: 100%; height: auto; }
 }
 .pl-type input {
   flex: 1; min-height: var(--pl-target); font-size: var(--pl-text-body-size);
-  padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line);
-  border-radius: 12px; background: var(--pl-surface); color: var(--pl-text);
+  padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line-strong);
+  border-radius: var(--pl-radius-input); background: var(--pl-surface); color: var(--pl-text);
 }
 
-/* --- Hint card (meaning picture -> first letter -> word) --- */
-.pl-hint { text-align: center; }
-.pl-hint__level { color: var(--pl-muted); font-size: 20px; margin-bottom: var(--pl-space-1); }
-.pl-hint__letter { font-size: 96px; font-weight: 700; color: var(--pl-primary); }
+/* --- Hint card: amber, distinct from practice (prototype) --- */
+.pl-hint { text-align: left; background: var(--pl-hint-bg); border-color: var(--pl-hint-line); }
+.pl-hint__level { color: var(--pl-hint-banner); font-weight: 600; font-size: 15px; margin-bottom: var(--pl-space-1); }
+.pl-hint .pl-hint-text { color: var(--pl-hint-ink); }
+.pl-hint__letter { font-size: 40px; font-weight: 700; color: var(--pl-hint-ink); }
 
-/* --- Found tick (quiet, brief) --- */
-.pl-found { text-align: center; color: var(--pl-good); }
+/* --- Success tick: pine circle + white check (prototype) --- */
+.pl-found { text-align: center; color: var(--pl-text); }
 .pl-found__tick {
-  width: 96px; height: 96px; border-radius: 50%;
-  background: var(--pl-good-bg); color: var(--pl-good);
+  width: 72px; height: 72px; border-radius: 50%;
+  background: var(--pl-primary); color: var(--pl-on-primary);
   display: flex; align-items: center; justify-content: center;
-  font-size: 56px; margin: 0 auto var(--pl-space-2);
+  font-size: 36px; margin: 0 auto var(--pl-space-2);
 }
 
-/* --- Being heard: loudness bar with the person's baseline marker. No numbers (DS-P02). --- */
-.pl-bar { position: relative; height: 40px; border-radius: 999px; background: var(--pl-caption-bg); overflow: hidden; }
-.pl-bar__fill { height: 100%; background: var(--pl-primary); width: 0%; transition: width var(--pl-motion) ease; }
-.pl-bar__marker { position: absolute; top: -6px; bottom: -6px; width: 4px; background: var(--pl-text); }
-.pl-bar__label { color: var(--pl-muted); font-size: 20px; margin-top: var(--pl-space-1); }
+/* --- Being heard: loudness meter with the person's baseline marker. No numbers (DS-P02). --- */
+.pl-bar { position: relative; height: 16px; border-radius: 999px; background: var(--pl-tile); overflow: visible; }
+.pl-bar__fill { height: 100%; background: var(--pl-primary); width: 0%; border-radius: 999px; transition: width var(--pl-motion) ease; }
+.pl-bar__marker { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--pl-text); opacity: .55; }
+.pl-bar__label { color: var(--pl-muted); font-size: 16px; margin-top: var(--pl-space-1); }
 
 /* --- Saving energy: time-used bar. Counts UP, never warns, never a countdown (DS-T01). --- */
-.pl-timebar .pl-bar__fill { background: var(--pl-line); }
+.pl-timebar .pl-bar__fill { background: var(--pl-primary); }
 
 /* --- Need cards (P0, multi-select) --- */
-.pl-needs { display: grid; grid-template-columns: 1fr; gap: var(--pl-gap-target); }
-@media (min-width: 560px) { .pl-needs { grid-template-columns: 1fr 1fr; } }
+/* One card per row (prototype). Single-select; the whole list stays in the viewport. */
+.pl-needs { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .pl-need {
-  display: flex; gap: var(--pl-space-2); align-items: flex-start; text-align: left;
-  padding: var(--pl-space-3); min-height: var(--pl-target);
-  border: 3px solid var(--pl-line); border-radius: var(--pl-radius-card);
+  display: flex; gap: 14px; align-items: center; text-align: left;
+  padding: 13px 16px; min-height: 0;
+  border: 2px solid var(--pl-line); border-radius: var(--pl-radius-card);
   background: var(--pl-surface); color: var(--pl-text); cursor: pointer; width: 100%;
   font-size: var(--pl-text-body-size);
 }
-.pl-need[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); }
-.pl-need__check { font-size: 28px; color: var(--pl-primary); min-width: 32px; }
-.pl-need__title { font-weight: 700; }
-.pl-need__desc { color: var(--pl-muted); font-size: 20px; }
+.pl-need[aria-pressed="true"] { border-color: var(--pl-primary); }
+.pl-need__tile {               /* icon tile (prototype choice-card anatomy) */
+  flex: none; width: 44px; height: 44px; border-radius: var(--pl-radius-tile);
+  background: var(--pl-tile); display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+}
+.pl-need__body { flex: 1; min-width: 0; }
+.pl-need__title { font-weight: 700; font-size: 19px; display: block; color: var(--pl-text); }
+.pl-need__desc { color: var(--pl-muted); font-size: 15px; line-height: 1.35; display: block; margin-top: 2px; }
+.pl-need__sel {                /* trailing selector: grey ring -> pine circle + white check */
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  border: 2px solid var(--pl-line-strong); background: var(--pl-surface);
+  display: inline-grid; place-items: center; color: var(--pl-on-primary);
+}
+.pl-need__sel svg { opacity: 0; }
+.pl-need[aria-pressed="true"] .pl-need__sel { border-color: var(--pl-primary); background: var(--pl-primary); }
+.pl-need[aria-pressed="true"] .pl-need__sel svg { opacity: 1; }
 
-/* --- Settings rows --- */
-.pl-setting { display: flex; flex-direction: column; gap: var(--pl-space-1); padding: var(--pl-space-2) 0; border-bottom: 1px solid var(--pl-line); }
+/* --- State chip: a small dot + a WORD (never colour alone, DS-A05) --- */
+.pl-chip {
+  display: inline-flex; align-items: center; align-self: center; gap: 8px;
+  font-size: 16px; font-weight: 600; color: var(--pl-primary);
+}
+.pl-chip__dot { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 2px solid currentColor; }
+.pl-chip__dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pl-chip[data-mode="resting"] { color: var(--pl-muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .pl-chip[data-mode="listening"] .pl-chip__dot::after { animation: pl-pulse 1.8s ease-in-out infinite; }
+}
+@keyframes pl-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.45;transform:scale(.8)} }
+
+/* --- Settings cards (prototype) --- */
+.pl-setting { display: flex; flex-direction: column; gap: var(--pl-space-1); background: var(--pl-surface); border: 1px solid var(--pl-line); border-radius: var(--pl-radius-card); padding: 18px 20px; }
 .pl-setting__row { display: flex; align-items: center; justify-content: space-between; gap: var(--pl-space-2); }
 .pl-pill { display: inline-flex; gap: var(--pl-space-1); }
-.pl-pill button { min-height: var(--pl-target); min-width: var(--pl-target); border-radius: 12px; border: 2px solid var(--pl-line); background: var(--pl-surface); color: var(--pl-text); font-size: 20px; cursor: pointer; }
+.pl-pill button { min-height: var(--pl-target); min-width: var(--pl-target); border-radius: var(--pl-radius-input); border: 2px solid var(--pl-line-strong); background: var(--pl-surface); color: var(--pl-text); font-size: 20px; cursor: pointer; }
 .pl-pill button[aria-pressed="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
 .pl-locked { color: var(--pl-muted); font-size: 18px; }
 
 /* --- Safety card: a modal alertdialog. Danger colour here only (DS-S). --- */
+/* --- Safety: full-screen blush theme, distinct on purpose (prototype). Fixed colours so it
+   reads the same in light and dark. --- */
 .pl-safety-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-  display: flex; align-items: center; justify-content: center; padding: var(--pl-space-3); z-index: 50;
+  position: fixed; inset: 0; background: #F8E3E1; z-index: 50; overflow: auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: var(--pl-space-4) var(--pl-space-3);
 }
 .pl-safety {
-  background: var(--pl-surface); border: 4px solid var(--pl-danger);
-  border-radius: var(--pl-radius-card); max-width: 560px; width: 100%;
-  padding: var(--pl-space-4); text-align: center;
+  background: transparent; border: none; max-width: 460px; width: 100%;
+  display: flex; flex-direction: column; align-items: center;
 }
-.pl-safety__icon { font-size: 56px; }
-.pl-safety__title { font-size: 32px; font-weight: 700; color: var(--pl-danger); margin: var(--pl-space-2) 0; }
-.pl-safety__body { font-size: var(--pl-text-body-size); }
+.pl-safety__icon {
+  display: inline-grid; place-items: center; width: 72px; height: 72px; border-radius: 50%;
+  background: #96222A; color: #fff; margin-bottom: 14px; font-size: 36px;
+}
+.pl-safety__title { font-size: 30px; font-weight: 700; color: #96222A; margin: 0 0 12px; line-height: 1.15; text-wrap: balance; }
+.pl-safety__body { font-size: 19px; color: #5A1B1F; margin: 0 0 22px; }
 .pl-safety__call {
-  display: inline-flex; align-items: center; justify-content: center;
-  margin-top: var(--pl-space-3); background: var(--pl-danger); color: #fff;
-  min-height: var(--pl-button-height); width: 100%; border-radius: var(--pl-radius-button);
-  font-size: 30px; font-weight: 700; text-decoration: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+  background: #96222A; color: #fff;
+  min-height: 64px; width: 100%; border-radius: var(--pl-radius-button);
+  font-size: 21px; font-weight: 700; text-decoration: none;
 }
-.pl-safety__dismiss { margin-top: var(--pl-space-2); }
+.pl-safety__dismiss { margin-top: 11px; width: 100%; background: #fff; color: #10201B; border: 2px solid #CDD4CF; }
 
 /* --- State banner (connecting / resting / mic blocked / offline) --- */
 .pl-state { text-align: center; }
@@ -357,14 +429,14 @@ img, svg, canvas { max-width: 100%; height: auto; }
 .pl-console .pl-btn, .pl-console button { min-height: var(--pl-target-console); }
 .pl-grid-wrap { overflow-x: auto; }       /* wide tables scroll inside themselves, not the page */
 table.pl-grid { border-collapse: collapse; width: 100%; font-size: var(--pl-text-console-size); }
-table.pl-grid th, table.pl-grid td { border: 1px solid var(--pl-line); padding: var(--pl-space-1) var(--pl-space-2); text-align: center; }
+table.pl-grid th, table.pl-grid td { border: 1px solid var(--pl-line-strong); padding: var(--pl-space-1) var(--pl-space-2); text-align: center; }
 table.pl-grid th { background: var(--pl-caption-bg); }
 .pl-cell { font-weight: 700; }
 .pl-cell--check { color: var(--pl-good); }
 .pl-cell--hint { color: var(--pl-warn); }
 .pl-cell--none { color: var(--pl-muted); }
 .pl-tabs { display: flex; gap: var(--pl-space-1); flex-wrap: wrap; margin-bottom: var(--pl-space-2); }
-.pl-tab { min-height: var(--pl-target-console); padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line); border-radius: 10px; background: var(--pl-surface); color: var(--pl-text); cursor: pointer; font-size: var(--pl-text-console-size); }
+.pl-tab { min-height: var(--pl-target-console); padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line-strong); border-radius: var(--pl-radius-input); background: var(--pl-surface); color: var(--pl-text); cursor: pointer; font-size: var(--pl-text-console-size); }
 .pl-tab[aria-selected="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
 
 /* --- J1 judge trace --- */
@@ -382,7 +454,6 @@ table.pl-grid th { background: var(--pl-caption-bg); }
 .pl-swatch__chip { height: 56px; }
 .pl-swatch__name { padding: 6px 8px; }
 .pl-theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 60; }
-
 </style>
 </head>
 <body>
@@ -728,27 +799,48 @@ window.PLClient = {
     return text;
   }
 
+  // ---- inline SVG icons (copied verbatim from the design prototype) ----
+  const ICON = {
+    mic: '<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21.5"/>',
+    check: '<polyline points="4 12 9 17 20 6"/>',
+    help: '<circle cx="12" cy="12" r="9.5"/><path d="M9.3 9a2.7 2.7 0 0 1 4.3 2c0 1.6-2 2-2 3.4"/><line x1="11.6" y1="17.6" x2="11.7" y2="17.6"/>',
+    stop: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+    phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/>',
+    warn: '<path d="M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13.5"/><line x1="12" y1="17" x2="12" y2="17"/>',
+  };
+  function icon(name, size) {
+    const s = h('span', { class: 'pl-icon', 'aria-hidden': 'true' });
+    s.innerHTML = `<svg width="${size || 22}" height="${size || 22}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ''}</svg>`;
+    return s;
+  }
+
   // ---- client wiring ----
   function makeClient() {
     const c = mode === 'audio' ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
             : mode === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
             : new window.PLClient.DemoEngine();
-    if (mode !== 'audio') c.setProfile([...state.needs][0] || 'finding_words');
+    c.setProfile([...state.needs][0] || 'finding_words');
     const on = (type, fn) => c.addEventListener(type, (e) => {
       if (c !== client) return;
       if (state.ended && state.ended.reason === 'safety' && type !== 'ended') return;
       trace(type, e.detail); fn(e.detail);
     });
 
+    on('caption', (d) => {
+      if (d.partial && state.captions.at(-1)?.who === 'you') state.captions.pop();
+      pushCaption(d.who || 'you', d.text);
+    });
+    on('voiceNotice', (d) => { pushCaption('listener', d.text); });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
-    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
+    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
     on('state', (d) => { state.ringMode = d.state; updateRing(); });
     on('backchannel', (d) => { pushCaption('listener', d.caption); });
     on('offerHint', () => { state.ringMode = 'hint_offered'; pushCaption('listener', 'Want a hint?'); state.offerHint = true; show('P3'); });
     on('hint', (d) => { state.hint = d; state.offerHint = false; pushCaption('listener', d.text); show('P3'); });
     on('confirm', (d) => { state.confirmWord = d.word; pushCaption('listener', `Did you say ${d.word}?`); show('P3'); });
     on('found', (d) => { state.today.push(d.word); flashFound(d.word); });
-    on('loudness', (d) => { state.loudness = d.strong ? 'ok' : 'soft'; if (!d.strong) pushCaption('listener', 'A bit stronger?'); show('P3'); });
+    on('calibrationReady', (d) => { state.calibrationReady = d.ready === true; render(); });
+    on('loudness', (d) => { state.loudnessPosition = d.position; state.loudness = d.strong ? 'ok' : 'soft'; show('P3'); });
     on('whatIHeard', (d) => { state.whatIHeard = d.text; show('P3'); });
     on('reply', (d) => { pushCaption('listener', d.text); });
     on('moveOn', () => { pushCaption('listener', "Let's try another."); });
@@ -776,7 +868,12 @@ window.PLClient = {
     if (strip) renderCaptions(strip);
   }
 
-  function updateRing() { const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', ['speaking', 'hinting'].includes(state.ringMode) ? 'speaking' : state.ringMode === 'resting' ? 'resting' : 'listening'); }
+  function chipMode(m) { return ['speaking', 'hinting'].includes(m) ? 'speaking' : m === 'resting' ? 'resting' : 'listening'; }
+  function chipWord(m) { return { listening: 'Listening — no rush', silent: 'Listening — no rush', speaking: 'Speaking', hinting: 'Speaking', hint_offered: 'Waiting for you', resting: 'Resting' }[m] || 'Listening — no rush'; }
+  function updateRing() {
+    const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', chipMode(state.ringMode));
+    const c = document.getElementById('pl-chip'); if (c) { c.setAttribute('data-mode', chipMode(state.ringMode)); c.lastChild.textContent = chipWord(state.ringMode); }
+  }
 
   function flashFound(word) {
     show('P5');
@@ -816,16 +913,18 @@ window.PLClient = {
     return h('p', { class: 'pl-disclosure' }, h('span', { 'aria-hidden': 'true' }, '🤖 '), "I'm an AI practice partner.");
   }
   function topbar() {
+    const prof = window.PLClient.PROFILES[[...state.needs][0]];
+    const suffix = state.prompt && prof ? ' · ' + prof.label.toLowerCase() : '';
     return h('div', { class: 'pl-topbar' },
-      h('div', { class: 'pl-topbar__title' }, state.prompt ? (window.PLClient.PROFILES[[...state.needs][0]] ? window.PLClient.PROFILES[[...state.needs][0]].label : 'Practice') : 'Practice'),
-      h('button', { class: 'pl-stop', onclick: endSession, 'aria-label': 'Stop practice' }, '■ Stop'),
+      h('div', { class: 'pl-topbar__title' }, 'AI practice partner' + suffix),
+      h('button', { class: 'pl-stop', onclick: endSession, 'aria-label': 'Stop practice' }, icon('stop', 18), 'Stop'),
     );
   }
   function renderCaptions(strip) {
     strip.innerHTML = '';
     for (const c of state.captions) {
       strip.append(h('div', {},
-        h('span', { class: 'pl-caption__who' }, c.who === 'you' ? 'You: ' : 'Listener: '),
+        h('span', { class: 'pl-caption__who' }, c.who === 'you' ? 'You' : 'Listener'),
         h('span', { class: 'pl-caption__line--' + c.who }, c.text)));
     }
   }
@@ -833,29 +932,29 @@ window.PLClient = {
   // ---- P0: needs picker ----
   function screenP0(app) {
     const NEEDS = [
-      ['finding_words', 'Finding the word', 'I know what I mean but the word will not come. I will wait, and help only if you ask.'],
-      ['words_out', 'Getting words started', 'The words get stuck at the start. I will stay quiet and never rush you.'],
-      ['being_heard', 'Being loud enough', 'My voice is quiet. I will show you when to give a little more.'],
-      ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.'],
-      ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.'],
+      ['finding_words', 'Finding the word', 'I know what I mean but the word will not come. I will wait, and help only if you ask.', '🗣️'],
+      ['words_out', 'Getting words started', 'The words get stuck at the start. I will stay quiet and never rush you.', '⏱️'],
+      ['being_heard', 'Being loud enough', 'My voice is quiet. I will show you when to give a little more.', '📢'],
+      ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.', '📝'],
+      ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.', '🌙'],
     ];
-    const grid = h('div', { class: 'pl-needs', role: 'group', 'aria-label': 'What is hard right now? Pick any.' });
-    NEEDS.forEach(([key, title, desc], i) => {
+    const grid = h('div', { class: 'pl-needs', role: 'radiogroup', 'aria-label': 'What is hard right now? Pick one.' });
+    NEEDS.forEach(([key, title, desc, emoji], i) => {
       const pressed = state.needs.has(key);
       grid.append(h('button', {
-        class: 'pl-need', 'aria-pressed': String(pressed), 'data-autofocus': i === 0 ? '' : null,
-        onclick: () => { pressed ? state.needs.delete(key) : state.needs.add(key); render(); },
+        class: 'pl-need', role: 'radio', 'aria-checked': String(pressed), 'aria-pressed': String(pressed), 'data-autofocus': i === 0 ? '' : null,
+        onclick: () => { state.needs = pressed ? new Set() : new Set([key]); render(); },
       },
-        h('span', { class: 'pl-need__check', 'aria-hidden': 'true' }, pressed ? '✓' : '○'),
-        h('span', {}, h('span', { class: 'pl-need__title' }, title), h('br'), h('span', { class: 'pl-need__desc' }, desc)),
+        h('span', { class: 'pl-need__tile', 'aria-hidden': 'true' }, emoji),
+        h('span', { class: 'pl-need__body' }, h('span', { class: 'pl-need__title' }, title), h('span', { class: 'pl-need__desc' }, desc)),
+        h('span', { class: 'pl-need__sel', 'aria-hidden': 'true' }, icon('check', 20)),
       ));
     });
     app.append(
       h('h1', { class: 'pl-prompt' }, 'What is hard right now?'),
-      h('p', { class: 'pl-muted' }, 'Pick any that fit. You can change this later. No diagnosis needed.'),
+      h('p', { class: 'pl-muted' }, 'Pick the one that fits best. You can change it later.'),
       grid,
       h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!live) { client = makeClient(); } show('P1'); } } }, 'Next'),
-      disclosure(),
     );
   }
 
@@ -863,8 +962,9 @@ window.PLClient = {
   function screenP1(app) {
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
-        h('h1', { class: 'pl-prompt' }, 'Hi Margaret.'),
-        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, '▶ Start talking'),
+        h('h1', { class: 'pl-prompt' }, 'Hi, Margaret.'),
+        h('p', { class: 'pl-muted' }, "I'm an AI practice partner. We talk, and I wait for you."),
+        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, icon('mic', 24), 'Start talking'),
         h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.waits.sessionMin = 5; show('P2'); } }, 'Short chat (5 minutes)'),
         disclosure(),
       ));
@@ -876,8 +976,8 @@ window.PLClient = {
       h('div', { class: 'pl-screen pl-screen--center' },
         h('h1', { class: 'pl-prompt' }, 'Can you hear me?'),
         h('p', { class: 'pl-muted' }, live ? 'Tap to allow the microphone, then say hello.' : 'No microphone needed — use the on-screen controls.'),
-        h('div', { class: 'pl-ring', 'aria-hidden': 'true' }, '🔊'),
-        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, 'Yes, start'),
+        h('div', { class: 'pl-ring', 'data-mode': 'listening', 'aria-hidden': 'true' }, icon('mic', 40)),
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, icon('mic', 22), 'Yes, start'),
       ));
   }
 
@@ -901,19 +1001,22 @@ window.PLClient = {
     const p = state.prompt || { topic: '', photo: '🖼️', text: 'Take your time.' };
     const profile = [...state.needs][0] || 'finding_words';
 
-    // Prompt + photo
+    // Prompt + photo. The photo is hidden while an answer card (hint/confirm/offer/heard) is
+    // showing, so the whole turn stays in the viewport without scrolling.
+    const answering = !!(state.hint || state.confirmWord || state.offerHint || state.whatIHeard);
     app.append(h('div', { class: 'pl-card' },
-      h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
-      h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') })));
+      answering ? null : h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
+      h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') }),
+      p.instruction ? h('p', {}, p.instruction) : null));
 
     // Profile-specific feedback area (P3b)
-    if (state.feedback === 'loudness') app.append(loudnessBar());
+    if (state.feedback === 'loudness' && !p.calibration) app.append(loudnessBar());
     if (state.feedback === 'time_used') app.append(timeBar());
-    if (state.feedback === 'what_i_heard' && state.whatIHeard) app.append(whatIHeardCard());
+    if (state.whatIHeard) app.append(whatIHeardCard());
 
-    // Ring (static; a timer is never shown)
-    const ringLabel = profile === 'words_out' ? 'I am listening. Take all the time you need.' : 'Listening';
-    app.append(h('div', { id: 'pl-ring', class: 'pl-ring', 'data-mode': state.ringMode, role: 'status', 'aria-label': ringLabel }, ringLabel));
+    // State chip: a small animated dot + a plain word (no big ring, per the prototype).
+    app.append(h('div', { id: 'pl-chip', class: 'pl-chip', 'data-mode': chipMode(state.ringMode), role: 'status' },
+      h('span', { class: 'pl-chip__dot', 'aria-hidden': 'true' }), chipWord(state.ringMode)));
 
     // Hint area (P4)
     if (state.hint) app.append(hintCard());
@@ -925,20 +1028,24 @@ window.PLClient = {
 
     // Actions: one main action per profile + Stop (in the topbar)
     const row = h('div', { class: 'pl-btn-row' });
-    if (state.confirmWord) {
-      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.confirmWord = null; client.answer(true); } }, `Yes, ${state.confirmWord}`));
-      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.confirmWord = null; client.answer(false); } }, 'No'));
+    if (p.calibration) {
+      row.append(h('button', {class: 'pl-btn pl-btn--primary', disabled: state.calibrationReady ? null : '',
+        onclick: () => { state.calibrationReady = false; client.calibrationNext(); render(); }}, 'Use this phrase'));
+      row.append(h('button', {class: 'pl-btn pl-btn--secondary', onclick: () => client.calibrationSkip()}, 'Practise without voice level'));
+    } else if (state.confirmWord) {
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.confirmWord = null; client.answer(true); } }, icon('check', 20), `Yes, ${state.confirmWord}`));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.confirmWord = null; client.answer(false); } }, 'No, not yet'));
     } else if (state.offerHint) {
       row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.offerHint = false; client.answer(true); } }, 'Yes, a hint'));
       row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.offerHint = false; client.answer(false); } }, 'No, keep going'));
-    } else if (state.feedback === 'what_i_heard' && state.whatIHeard) {
-      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.whatIHeard = null; client.confirmTap(true); } }, '✓ That is right'));
-      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.whatIHeard = null; client.confirmTap(false); } }, '✎ Not quite'));
+    } else if (state.whatIHeard) {
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.whatIHeard = null; client.confirmTap(true); } }, icon('check', 20), "That's right"));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.whatIHeard = null; client.confirmTap(false); } }, 'Fix it'));
     } else {
-      if (profile === 'words_out') row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => client.done() }, '✓ Done'));
+      if (profile === 'words_out') row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => client.done() }, icon('check', 22), 'Done'));
       else if (profile !== 'being_heard' && profile !== 'being_clear' && profile !== 'saving_energy')
-        row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.help() }, '💡 Help'));
-      if (profile === 'saving_energy') row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.rest() }, '☕ Rest'));
+        row.append(h('button', { class: 'pl-btn pl-btn--primary', onclick: () => client.help() }, icon('help', 22), 'Help'));
+      if (profile === 'saving_energy') row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.rest() }, 'Rest'));
     }
     app.append(row);
 
@@ -958,13 +1065,13 @@ window.PLClient = {
   }
 
   function loudnessBar() {
-    const pct = state.loudness === 'ok' ? 80 : state.loudness === 'soft' ? 35 : 55;
+    const pct = Number.isFinite(state.loudnessPosition) ? Math.max(0, Math.min(100, state.loudnessPosition * 100)) : 0;
     return h('div', { class: 'pl-card' },
-      h('p', { class: 'pl-prompt' }, state.loudness === 'soft' ? 'A bit stronger?' : 'Good and clear.'),
-      h('div', { class: 'pl-bar', role: 'img', 'aria-label': state.loudness === 'soft' ? 'Your voice is below your usual level' : 'Your voice is at a good level' },
+      h('p', { class: 'pl-prompt' }, state.loudness === 'soft' ? 'A bit stronger?' : 'Your voice level'),
+      h('div', { class: 'pl-bar', role: 'img', 'aria-label': state.loudness === 'soft' ? 'Your voice is below the level you chose today' : state.loudness ? 'Your voice is near the level you chose today' : 'Waiting for microphone speech' },
         h('div', { class: 'pl-bar__fill', style: `width:${pct}%` }),
         h('div', { class: 'pl-bar__marker', style: 'left:60%' })),
-      h('div', { class: 'pl-bar__label' }, 'The line is your usual strong voice.'));
+      h('div', { class: 'pl-bar__label' }, 'The line is the voice level you chose today.'));
   }
 
   function timeBar() {
@@ -984,7 +1091,7 @@ window.PLClient = {
   // Demo-only controls standing in for the microphone / ASR.
   function demoControls(profile) {
     const mk = (label, fn) => h('button', { class: 'pl-tab', onclick: fn }, label);
-    const row = h('div', { class: 'pl-tabs', style: 'margin-top:16px' });
+    const row = h('div', { class: 'pl-tabs', style: 'margin-top:6px' });
     row.append(h('span', { class: 'pl-locked' }, 'Demo controls (stand in for the mic): '));
     row.append(mk('⏸ pause', () => client.beginPause()));
     if (profile !== 'words_out') row.append(mk('🎤 say the word', () => client.sayWord()));
@@ -1000,7 +1107,7 @@ window.PLClient = {
   function screenP5(app) {
     const word = state.today[state.today.length - 1] || '';
     app.append(h('div', { class: 'pl-screen pl-screen--center pl-found' },
-      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, '✓'),
+      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, icon('check', 36)),
       h('p', { class: 'pl-hint-text' }, `Yes — ${word}.`)));
   }
 
@@ -1008,6 +1115,7 @@ window.PLClient = {
   function screenEnd(app) {
     const found = (state.ended && state.ended.found) || state.today;
     app.append(h('div', { class: 'pl-screen pl-screen--center' },
+      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, icon('check', 36)),
       h('h1', { class: 'pl-prompt' }, 'Well done today.'),
       h('div', { class: 'pl-card', style: 'width:100%' },
         h('p', { class: 'pl-muted' }, found.length ? 'Words you found:' : 'Thanks for practising.'),
@@ -1055,11 +1163,11 @@ window.PLClient = {
     const s = state.safety;
     const backdrop = h('div', { class: 'pl-safety-backdrop' });
     const dlg = h('div', { class: 'pl-safety', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'pl-safety-title', 'aria-describedby': 'pl-safety-body', tabindex: '-1' },
-      h('div', { class: 'pl-safety__icon', 'aria-hidden': 'true' }, s.card === 'stroke_signs' ? '🚑' : '💛'),
+      h('div', { class: 'pl-safety__icon', 'aria-hidden': 'true' }, icon('warn', 36)),
       h('h2', { id: 'pl-safety-title', class: 'pl-safety__title' }, s.title),
       h('p', { id: 'pl-safety-body', class: 'pl-safety__body' }, s.body),
-      s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, `📞 Call ${s.number}`) : null,
-      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: dismissSafety }, 'Close card'),
+      s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, icon('phone', 22), `Call ${s.number}`) : null,
+      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: dismissSafety }, "I'm OK, close"),
     );
     backdrop.append(dlg);
     root.append(backdrop);
@@ -1079,7 +1187,7 @@ window.PLClient = {
   // ---- P9: states ----
   function screenP9(app) {
     app.append(h('div', { class: 'pl-screen pl-screen--center pl-state' },
-      h('div', { class: 'pl-ring', 'data-mode': 'resting', 'aria-hidden': 'true' }, '…'),
+      h('div', { class: 'pl-ring', 'data-mode': 'resting', 'aria-hidden': 'true' }, icon('mic', 40)),
       h('h1', { class: 'pl-prompt' }, 'Microphone is blocked'),
       h('p', { class: 'pl-state__what' }, 'Allow the microphone in your browser, then tap below.'),
       h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again')));
@@ -1125,7 +1233,6 @@ window.PLClient = {
   // ---- boot ----
   render();
 })();
-
 </script>
 </body>
 </html>

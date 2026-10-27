@@ -48,6 +48,21 @@
     return text;
   }
 
+  // ---- inline SVG icons (copied verbatim from the design prototype) ----
+  const ICON = {
+    mic: '<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21.5"/>',
+    check: '<polyline points="4 12 9 17 20 6"/>',
+    help: '<circle cx="12" cy="12" r="9.5"/><path d="M9.3 9a2.7 2.7 0 0 1 4.3 2c0 1.6-2 2-2 3.4"/><line x1="11.6" y1="17.6" x2="11.7" y2="17.6"/>',
+    stop: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+    phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/>',
+    warn: '<path d="M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13.5"/><line x1="12" y1="17" x2="12" y2="17"/>',
+  };
+  function icon(name, size) {
+    const s = h('span', { class: 'pl-icon', 'aria-hidden': 'true' });
+    s.innerHTML = `<svg width="${size || 22}" height="${size || 22}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ''}</svg>`;
+    return s;
+  }
+
   // ---- client wiring ----
   function makeClient() {
     const c = mode === 'audio' ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
@@ -102,7 +117,12 @@
     if (strip) renderCaptions(strip);
   }
 
-  function updateRing() { const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', ['speaking', 'hinting'].includes(state.ringMode) ? 'speaking' : state.ringMode === 'resting' ? 'resting' : 'listening'); }
+  function chipMode(m) { return ['speaking', 'hinting'].includes(m) ? 'speaking' : m === 'resting' ? 'resting' : 'listening'; }
+  function chipWord(m) { return { listening: 'Listening — no rush', silent: 'Listening — no rush', speaking: 'Speaking', hinting: 'Speaking', hint_offered: 'Waiting for you', resting: 'Resting' }[m] || 'Listening — no rush'; }
+  function updateRing() {
+    const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', chipMode(state.ringMode));
+    const c = document.getElementById('pl-chip'); if (c) { c.setAttribute('data-mode', chipMode(state.ringMode)); c.lastChild.textContent = chipWord(state.ringMode); }
+  }
 
   function flashFound(word) {
     show('P5');
@@ -142,16 +162,18 @@
     return h('p', { class: 'pl-disclosure' }, h('span', { 'aria-hidden': 'true' }, '🤖 '), "I'm an AI practice partner.");
   }
   function topbar() {
+    const prof = window.PLClient.PROFILES[[...state.needs][0]];
+    const suffix = state.prompt && prof ? ' · ' + prof.label.toLowerCase() : '';
     return h('div', { class: 'pl-topbar' },
-      h('div', { class: 'pl-topbar__title' }, state.prompt ? (window.PLClient.PROFILES[[...state.needs][0]] ? window.PLClient.PROFILES[[...state.needs][0]].label : 'Practice') : 'Practice'),
-      h('button', { class: 'pl-stop', onclick: endSession, 'aria-label': 'Stop practice' }, '■ Stop'),
+      h('div', { class: 'pl-topbar__title' }, 'AI practice partner' + suffix),
+      h('button', { class: 'pl-stop', onclick: endSession, 'aria-label': 'Stop practice' }, icon('stop', 18), 'Stop'),
     );
   }
   function renderCaptions(strip) {
     strip.innerHTML = '';
     for (const c of state.captions) {
       strip.append(h('div', {},
-        h('span', { class: 'pl-caption__who' }, c.who === 'you' ? 'You: ' : 'Listener: '),
+        h('span', { class: 'pl-caption__who' }, c.who === 'you' ? 'You' : 'Listener'),
         h('span', { class: 'pl-caption__line--' + c.who }, c.text)));
     }
   }
@@ -159,29 +181,29 @@
   // ---- P0: needs picker ----
   function screenP0(app) {
     const NEEDS = [
-      ['finding_words', 'Finding the word', 'I know what I mean but the word will not come. I will wait, and help only if you ask.'],
-      ['words_out', 'Getting words started', 'The words get stuck at the start. I will stay quiet and never rush you.'],
-      ['being_heard', 'Being loud enough', 'My voice is quiet. I will show you when to give a little more.'],
-      ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.'],
-      ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.'],
+      ['finding_words', 'Finding the word', 'I know what I mean but the word will not come. I will wait, and help only if you ask.', '🗣️'],
+      ['words_out', 'Getting words started', 'The words get stuck at the start. I will stay quiet and never rush you.', '⏱️'],
+      ['being_heard', 'Being loud enough', 'My voice is quiet. I will show you when to give a little more.', '📢'],
+      ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.', '📝'],
+      ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.', '🌙'],
     ];
-    const grid = h('div', { class: 'pl-needs', role: 'group', 'aria-label': 'What is hard right now? Pick any.' });
-    NEEDS.forEach(([key, title, desc], i) => {
+    const grid = h('div', { class: 'pl-needs', role: 'radiogroup', 'aria-label': 'What is hard right now? Pick one.' });
+    NEEDS.forEach(([key, title, desc, emoji], i) => {
       const pressed = state.needs.has(key);
       grid.append(h('button', {
-        class: 'pl-need', 'aria-pressed': String(pressed), 'data-autofocus': i === 0 ? '' : null,
-        onclick: () => { pressed ? state.needs.delete(key) : state.needs.add(key); render(); },
+        class: 'pl-need', role: 'radio', 'aria-checked': String(pressed), 'aria-pressed': String(pressed), 'data-autofocus': i === 0 ? '' : null,
+        onclick: () => { state.needs = pressed ? new Set() : new Set([key]); render(); },
       },
-        h('span', { class: 'pl-need__check', 'aria-hidden': 'true' }, pressed ? '✓' : '○'),
-        h('span', {}, h('span', { class: 'pl-need__title' }, title), h('br'), h('span', { class: 'pl-need__desc' }, desc)),
+        h('span', { class: 'pl-need__tile', 'aria-hidden': 'true' }, emoji),
+        h('span', { class: 'pl-need__body' }, h('span', { class: 'pl-need__title' }, title), h('span', { class: 'pl-need__desc' }, desc)),
+        h('span', { class: 'pl-need__sel', 'aria-hidden': 'true' }, icon('check', 20)),
       ));
     });
     app.append(
       h('h1', { class: 'pl-prompt' }, 'What is hard right now?'),
-      h('p', { class: 'pl-muted' }, 'Pick any that fit. You can change this later. No diagnosis needed.'),
+      h('p', { class: 'pl-muted' }, 'Pick the one that fits best. You can change it later.'),
       grid,
       h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!live) { client = makeClient(); } show('P1'); } } }, 'Next'),
-      disclosure(),
     );
   }
 
@@ -189,8 +211,9 @@
   function screenP1(app) {
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
-        h('h1', { class: 'pl-prompt' }, 'Hi Margaret.'),
-        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, '▶ Start talking'),
+        h('h1', { class: 'pl-prompt' }, 'Hi, Margaret.'),
+        h('p', { class: 'pl-muted' }, "I'm an AI practice partner. We talk, and I wait for you."),
+        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, icon('mic', 24), 'Start talking'),
         h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.waits.sessionMin = 5; show('P2'); } }, 'Short chat (5 minutes)'),
         disclosure(),
       ));
@@ -202,8 +225,8 @@
       h('div', { class: 'pl-screen pl-screen--center' },
         h('h1', { class: 'pl-prompt' }, 'Can you hear me?'),
         h('p', { class: 'pl-muted' }, live ? 'Tap to allow the microphone, then say hello.' : 'No microphone needed — use the on-screen controls.'),
-        h('div', { class: 'pl-ring', 'aria-hidden': 'true' }, '🔊'),
-        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, 'Yes, start'),
+        h('div', { class: 'pl-ring', 'data-mode': 'listening', 'aria-hidden': 'true' }, icon('mic', 40)),
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, icon('mic', 22), 'Yes, start'),
       ));
   }
 
@@ -227,9 +250,11 @@
     const p = state.prompt || { topic: '', photo: '🖼️', text: 'Take your time.' };
     const profile = [...state.needs][0] || 'finding_words';
 
-    // Prompt + photo
+    // Prompt + photo. The photo is hidden while an answer card (hint/confirm/offer/heard) is
+    // showing, so the whole turn stays in the viewport without scrolling.
+    const answering = !!(state.hint || state.confirmWord || state.offerHint || state.whatIHeard);
     app.append(h('div', { class: 'pl-card' },
-      h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
+      answering ? null : h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
       h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') }),
       p.instruction ? h('p', {}, p.instruction) : null));
 
@@ -238,9 +263,9 @@
     if (state.feedback === 'time_used') app.append(timeBar());
     if (state.whatIHeard) app.append(whatIHeardCard());
 
-    // Ring (static; a timer is never shown)
-    const ringLabel = profile === 'words_out' ? 'I am listening. Take all the time you need.' : 'Listening';
-    app.append(h('div', { id: 'pl-ring', class: 'pl-ring', 'data-mode': state.ringMode, role: 'status', 'aria-label': ringLabel }, ringLabel));
+    // State chip: a small animated dot + a plain word (no big ring, per the prototype).
+    app.append(h('div', { id: 'pl-chip', class: 'pl-chip', 'data-mode': chipMode(state.ringMode), role: 'status' },
+      h('span', { class: 'pl-chip__dot', 'aria-hidden': 'true' }), chipWord(state.ringMode)));
 
     // Hint area (P4)
     if (state.hint) app.append(hintCard());
@@ -257,19 +282,19 @@
         onclick: () => { state.calibrationReady = false; client.calibrationNext(); render(); }}, 'Use this phrase'));
       row.append(h('button', {class: 'pl-btn pl-btn--secondary', onclick: () => client.calibrationSkip()}, 'Practise without voice level'));
     } else if (state.confirmWord) {
-      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.confirmWord = null; client.answer(true); } }, `Yes, ${state.confirmWord}`));
-      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.confirmWord = null; client.answer(false); } }, 'No'));
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.confirmWord = null; client.answer(true); } }, icon('check', 20), `Yes, ${state.confirmWord}`));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.confirmWord = null; client.answer(false); } }, 'No, not yet'));
     } else if (state.offerHint) {
       row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.offerHint = false; client.answer(true); } }, 'Yes, a hint'));
       row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.offerHint = false; client.answer(false); } }, 'No, keep going'));
     } else if (state.whatIHeard) {
-      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.whatIHeard = null; client.confirmTap(true); } }, '✓ That is right'));
-      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.whatIHeard = null; client.confirmTap(false); } }, '✎ Not quite'));
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.whatIHeard = null; client.confirmTap(true); } }, icon('check', 20), "That's right"));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.whatIHeard = null; client.confirmTap(false); } }, 'Fix it'));
     } else {
-      if (profile === 'words_out') row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => client.done() }, '✓ Done'));
+      if (profile === 'words_out') row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => client.done() }, icon('check', 22), 'Done'));
       else if (profile !== 'being_heard' && profile !== 'being_clear' && profile !== 'saving_energy')
-        row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.help() }, '💡 Help'));
-      if (profile === 'saving_energy') row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.rest() }, '☕ Rest'));
+        row.append(h('button', { class: 'pl-btn pl-btn--primary', onclick: () => client.help() }, icon('help', 22), 'Help'));
+      if (profile === 'saving_energy') row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => client.rest() }, 'Rest'));
     }
     app.append(row);
 
@@ -315,7 +340,7 @@
   // Demo-only controls standing in for the microphone / ASR.
   function demoControls(profile) {
     const mk = (label, fn) => h('button', { class: 'pl-tab', onclick: fn }, label);
-    const row = h('div', { class: 'pl-tabs', style: 'margin-top:16px' });
+    const row = h('div', { class: 'pl-tabs', style: 'margin-top:6px' });
     row.append(h('span', { class: 'pl-locked' }, 'Demo controls (stand in for the mic): '));
     row.append(mk('⏸ pause', () => client.beginPause()));
     if (profile !== 'words_out') row.append(mk('🎤 say the word', () => client.sayWord()));
@@ -331,7 +356,7 @@
   function screenP5(app) {
     const word = state.today[state.today.length - 1] || '';
     app.append(h('div', { class: 'pl-screen pl-screen--center pl-found' },
-      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, '✓'),
+      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, icon('check', 36)),
       h('p', { class: 'pl-hint-text' }, `Yes — ${word}.`)));
   }
 
@@ -339,6 +364,7 @@
   function screenEnd(app) {
     const found = (state.ended && state.ended.found) || state.today;
     app.append(h('div', { class: 'pl-screen pl-screen--center' },
+      h('div', { class: 'pl-found__tick', 'aria-hidden': 'true' }, icon('check', 36)),
       h('h1', { class: 'pl-prompt' }, 'Well done today.'),
       h('div', { class: 'pl-card', style: 'width:100%' },
         h('p', { class: 'pl-muted' }, found.length ? 'Words you found:' : 'Thanks for practising.'),
@@ -386,11 +412,11 @@
     const s = state.safety;
     const backdrop = h('div', { class: 'pl-safety-backdrop' });
     const dlg = h('div', { class: 'pl-safety', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'pl-safety-title', 'aria-describedby': 'pl-safety-body', tabindex: '-1' },
-      h('div', { class: 'pl-safety__icon', 'aria-hidden': 'true' }, s.card === 'stroke_signs' ? '🚑' : '💛'),
+      h('div', { class: 'pl-safety__icon', 'aria-hidden': 'true' }, icon('warn', 36)),
       h('h2', { id: 'pl-safety-title', class: 'pl-safety__title' }, s.title),
       h('p', { id: 'pl-safety-body', class: 'pl-safety__body' }, s.body),
-      s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, `📞 Call ${s.number}`) : null,
-      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: dismissSafety }, 'Close card'),
+      s.number ? h('a', { class: 'pl-safety__call', href: `tel:${s.number.replace(/\s/g, '')}` }, icon('phone', 22), `Call ${s.number}`) : null,
+      h('button', { class: 'pl-btn pl-btn--secondary pl-safety__dismiss', onclick: dismissSafety }, "I'm OK, close"),
     );
     backdrop.append(dlg);
     root.append(backdrop);
@@ -410,7 +436,7 @@
   // ---- P9: states ----
   function screenP9(app) {
     app.append(h('div', { class: 'pl-screen pl-screen--center pl-state' },
-      h('div', { class: 'pl-ring', 'data-mode': 'resting', 'aria-hidden': 'true' }, '…'),
+      h('div', { class: 'pl-ring', 'data-mode': 'resting', 'aria-hidden': 'true' }, icon('mic', 40)),
       h('h1', { class: 'pl-prompt' }, 'Microphone is blocked'),
       h('p', { class: 'pl-state__what' }, 'Allow the microphone in your browser, then tap below.'),
       h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again')));
