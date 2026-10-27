@@ -152,6 +152,38 @@ async def create_word_draft(request: Request, person: str, draft: WordDraftInput
     return {"ok": True, "word": _word_dict(word)}
 
 
+class MeaningCueInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    meaning_cue: str = Field(max_length=90)
+
+    @field_validator("meaning_cue")
+    @classmethod
+    def single_line(cls, value: str) -> str:
+        return WordDraftInput.single_line(value)
+
+
+@router.patch("/words/{person}/{word_id}")
+async def update_meaning_cue(request: Request, person: str, word_id: str,
+                             changes: MeaningCueInput, access: Access) -> dict:
+    pid = _resolve(request, person, access)
+    if not access.store.can_manage_profile(pid, access.user_id):
+        raise HTTPException(403, "Only the linked therapist, or carer without a therapist, can edit cues")
+    state = _state(request)
+    person_key = ('demo-plan:' if access.demo else '') + pid
+    if not await state.sessions.claim(person_key):
+        raise HTTPException(409, "Stop practice or wait for plan generation before editing a cue")
+    try:
+        word = access.store.console_update_meaning_cue(pid, word_id,
+            actor=access.user_id, meaning_cue=changes.meaning_cue)
+    except PermissionError:
+        raise HTTPException(403, "Cue editing is no longer permitted") from None
+    except KeyError:
+        raise HTTPException(404, "Word not found") from None
+    finally:
+        await state.sessions.release(person_key)
+    return {"ok": True, "word": _word_dict(word), "regenerate_hints": True}
+
+
 @router.get("/grid/{person}")
 async def grid(request: Request, person: str, access: Access) -> dict:
     store = access.store

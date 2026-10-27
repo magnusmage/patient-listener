@@ -75,3 +75,55 @@ async def enroll(body: Enrollment, request: Request):
     response.set_cookie(COOKIE,secret,max_age=COOKIE_MAX_AGE,httponly=True,
         secure=request.app.state.settings.require_https,samesite='strict',path='/api/session')
     return response
+
+
+class PatientWaitInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    backchannel_s: float | None = None
+    offer_hint_s: float | None = None
+    max_wait_s: float | None = None
+    max_session_min: int | None = None
+
+
+def _patient(request: Request, person: str) -> tuple:
+    """Patient cookie and device authorize exactly one person, never a console token."""
+    _transport(request)
+    state = request.app.state.pl
+    pid = state.people.get(person, person)
+    try:
+        authorization = PatientAccess(state.store).credential_authorization(
+            pid, request.headers.get('x-pl-device', ''), request.cookies.get(COOKIE, ''))
+    except ValueError:
+        authorization = None
+    if authorization is None:
+        raise HTTPException(401, 'Device setup is required')
+    return state, pid
+
+
+@router.get('/api/session/settings')
+async def patient_settings(request: Request, person: str = 'margaret'):
+    from ..profile_settings import profile_values
+    state, pid = _patient(request, person)
+    return JSONResponse({'person_id': pid, 'settings': profile_values(state.store.person_pause(pid))},
+                        headers={'Cache-Control': 'no-store'})
+
+
+@router.patch('/api/session/settings')
+async def extend_patient_settings(request: Request, changes: PatientWaitInput,
+                                   person: str = 'margaret'):
+    from ..profile_settings import profile_values
+    state, pid = _patient(request, person)
+    # HTTP changes are for a not-yet-started session. An active socket must update
+    # its own controller using extend_settings, not just change persisted values.
+    if not await state.sessions.claim(pid):
+        raise HTTPException(409, 'Use extend_settings on the active practice WebSocket')
+    try:
+        cfg = state.store.patient_extend_profile(pid, changes.model_dump(exclude_unset=True))
+    except PermissionError:
+        raise HTTPException(403, 'You may only lengthen or switch off waits and the session cap') from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    finally:
+        await state.sessions.release(pid)
+    return JSONResponse({'ok': True, 'person_id': pid, 'applies_to': 'next_session',
+                         'settings': profile_values(cfg)}, headers={'Cache-Control': 'no-store'})

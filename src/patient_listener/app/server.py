@@ -132,7 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def private_api_no_cache(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith(("/api/console/", "/api/agent/", "/api/patient/", "/internal/")) or request.url.path == "/api/session":
+        if request.url.path.startswith(("/api/console/", "/api/agent/", "/api/patient/", "/api/session/", "/internal/")) or request.url.path == "/api/session":
             response.headers["Cache-Control"] = "no-store"
         return response
 
