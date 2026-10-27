@@ -254,6 +254,12 @@ class AppSession:
             if set(data) != {"minutes"}:
                 raise ValueError("extend_session requires minutes only")
             await self._extend_settings({"max_session_min": data["minutes"]})
+        elif name == "get_settings":
+            if data:
+                raise ValueError("get_settings takes no arguments")
+            from ..profile_settings import profile_values
+            await self._emit([{"type": "settings", "settings": profile_values(
+                replace(self.cfg, max_session_min=self._session_limit))}])
         elif name == "extend_settings":
             await self._extend_settings(data)
         elif name == "start":
@@ -495,7 +501,7 @@ class AppSession:
             self._cap = asyncio.create_task(self._watch_cap())
 
     async def _extend_settings(self, changes: dict) -> None:
-        from ..profile_settings import extend_only
+        from ..profile_settings import extend_only, profile_values
         async with self._engine_lock:
             if self.ended or self.closing:
                 return
@@ -508,10 +514,15 @@ class AppSession:
             self.cfg = replace(current, **clean)
             self.engine.cfg = self.cfg
             self.engine.controller.cfg = self.cfg
+        ticking = self._ticker is not None and not self._ticker.done()
+        if ticking:
+            self._cancel_ticker()
         if 'max_session_min' in clean:
             self._session_limit = clean['max_session_min']
             self._arm_cap()
-        await self._emit([{"type": "settingsSaved"}])
+        await self._emit([{"type": "settingsSaved", "settings": profile_values(self.cfg)}])
+        if ticking and not self.ended and not self.closing and not self._resting:
+            self._ticker = asyncio.create_task(self._tick())
 
     async def _watch_cap(self) -> None:
         try:

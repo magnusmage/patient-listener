@@ -255,6 +255,31 @@ class SqlStore:
             added_by="slt" if user["role"] == "therapist" else "carer", actor=actor,
         )
 
+    def console_update_meaning_cue(self, person_id: str, word_id: str, *, actor: str,
+                                   meaning_cue: str) -> WordEntry:
+        """Keep word/approval identity; invalidate derived hints atomically on cue edits."""
+        if (not isinstance(meaning_cue, str) or len(meaning_cue) > 90
+                or any(ord(c) < 32 or ord(c) == 127 for c in meaning_cue)):
+            raise ValueError("Use a single-line meaning cue of at most 90 characters")
+        meaning_cue = meaning_cue.strip()
+        with self._db:
+            if not self.can_manage_profile(person_id, actor):
+                raise PermissionError("Only the linked decision-maker can edit cues")
+            row = self._db.execute("SELECT * FROM words WHERE id=? AND person_id=?",
+                                   (word_id, person_id)).fetchone()
+            if row is None:
+                raise KeyError(word_id)
+            if row['meaning_cue'] != meaning_cue:
+                self._db.execute("UPDATE words SET meaning_cue=?, hints=NULL WHERE id=? AND person_id=?",
+                                 (meaning_cue, word_id, person_id))
+                self._db.execute("DELETE FROM hint_audio WHERE person_id=? AND word_id=?",
+                                 (person_id, word_id))
+                self._db.execute("INSERT INTO audit(actor,action,detail,at) VALUES (?,?,?,?)",
+                                 (actor, 'edit_meaning_cue', person_id + ':' + word_id, _now()))
+            updated = self._db.execute("SELECT * FROM words WHERE id=? AND person_id=?",
+                                       (word_id, person_id)).fetchone()
+        return _row_to_word(updated)
+
     def add_person(self, person_id: str, first_name: str, needs: frozenset[Need]) -> None:
         if self.person_deleted(person_id):
             raise ValueError("Deleted person IDs cannot be reused")
