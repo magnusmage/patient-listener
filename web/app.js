@@ -42,6 +42,11 @@
     settingsNote: '',       // transient note on the Settings screen
     connecting: false,      // starting a remote session (session fetch + WebSocket handshake)
     signingIn: false,       // redeeming a token on the Sign in screen
+    enrolled: null,         // {person_id, name, needs, settings} from /api/session/me (null until known)
+    enrolledName: '',       // the enrolled patient's display name, for the greeting
+    calibrationReady: false,// Being heard: the current calibration phrase is strong enough to keep
+    offerHint: false,       // a hint has been offered and is awaiting yes/no
+    loudnessPosition: null, // 0..1 position on the loudness bar for the last utterance
   };
 
   let client = null;
@@ -85,6 +90,12 @@
             : em === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
             : new window.PLClient.DemoEngine();
     c.setProfile([...state.needs][0] || 'finding_words');
+    // #2: an enrolled device authorises exactly one person. Pin the session to that person (and
+    // their real needs) so the need pick can never request a different persona and get a 401.
+    if (isRemote() && state.enrolled && state.enrolled.person_id) {
+      c.person = state.enrolled.person_id;
+      if (Array.isArray(state.enrolled.needs) && state.enrolled.needs.length) c.needs = state.enrolled.needs.slice();
+    }
     const on = (type, fn) => c.addEventListener(type, (e) => {
       if (c !== client) return;
       if (state.ended && state.ended.reason === 'safety' && type !== 'ended') return;
@@ -127,6 +138,8 @@
     // Patient-owned wait settings (P7), read and saved over the session WebSocket.
     on('settings', (d) => { applyServerSettings(d.settings); if (state.route === 'P7') render(); });
     on('settingsSaved', (d) => { applyServerSettings(d.settings); state.settingsNote = 'Saved. Applies to this and the next session.'; if (state.route === 'P7') render(); });
+    // Defensive only: the current server never emits this (a shorten closes the socket instead),
+    // and changeWait already refuses a shorten locally. Kept in case the server later sends it.
     on('settingsRejected', (d) => { state.settingsNote = d.reason || 'You can make a wait longer or switch it off, not shorter.'; if (state.route === 'P7') render(); });
     return c;
   }
@@ -180,6 +193,30 @@
   function loadPatientToken() { try { return window.localStorage.getItem(PATIENT_TOKEN_KEY) || ''; } catch (e) { return ''; } }
   function savePatientToken(value) { try { if (value) window.localStorage.setItem(PATIENT_TOKEN_KEY, value); else window.localStorage.removeItem(PATIENT_TOKEN_KEY); } catch (e) {} }
 
+  // Stop and release the active client before building another, so switching mode or starting a
+  // fresh session never leaks a WebSocket / microphone / AudioContext (#3).
+  function stopClient() { if (client) { try { client.stop('stop'); } catch (e) {} client = null; } }
+
+  // #2: ask the server which patient this enrolled device is (the cookie authorises exactly one),
+  // and their merged needs — no persona guess. Throws with .status 401 when not enrolled, in which
+  // case the app falls back to the picker and only prompts sign-in if the session itself rejects us.
+  async function fetchMe() {
+    const base = (typeof window.PL_API === 'string') ? window.PL_API : '';
+    const resp = await fetch(`${base}/api/session/me`, {
+      cache: 'no-store', headers: { 'X-PL-Device': window.PLClient.patientDeviceId() },
+    });
+    if (!resp.ok) { const e = new Error('Device is not enrolled'); e.status = resp.status; throw e; }
+    return resp.json();
+  }
+  function applyEnrolled(me) {
+    if (!me || !me.person_id) return;
+    state.enrolled = me;
+    state.enrolledName = me.name || '';
+    if (Array.isArray(me.needs) && me.needs.length) state.needs = new Set(me.needs);
+    if (me.settings) applyServerSettings(me.settings);
+  }
+  function clearEnrolled() { state.enrolled = null; state.enrolledName = ''; }
+
   async function enrollDevice(code) {
     const base = (typeof window.PL_API === 'string') ? window.PL_API : '';
     const resp = await fetch(`${base}/api/patient/enroll`, {
@@ -193,7 +230,11 @@
     const code = (document.getElementById('pl-setup-code').value || '').trim();
     if (!code) return;
     state.settingsNote = ''; state.signingIn = true; render();
-    try { await enrollDevice(code); savePatientToken(code); await beginSession(); }
+    try {
+      await enrollDevice(code); savePatientToken(code);
+      try { applyEnrolled(await fetchMe()); } catch (e) { /* session will still resolve the person */ }
+      await beginSession();
+    }
     catch (e) { state.settingsNote = e.message; }
     finally { state.signingIn = false; if (state.route === 'LOGIN') render(); }
   }
@@ -232,7 +273,7 @@
     root.innerHTML = '';
     const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
     app.append(themeToggle());
-    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9, LOGIN: screenLogin };
+    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9, LOGIN: screenLogin };
     (screens[state.route] || screenP0)(app);
     root.append(app);
     if (state.route === 'P8' && state.safety) overlaySafety();
@@ -276,9 +317,12 @@
       ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.', '📝'],
       ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.', '🌙'],
     ];
-    // In server/live mode only the needs backed by a seeded persona are offered; the rest are
-    // offline-demo only, so selecting them no longer silently practises as a different person.
-    const available = NEEDS.filter(([k]) => needKeysFor().includes(k));
+    // When the device is enrolled we know the patient and their therapist-set need(s), so show
+    // exactly those (#2). Otherwise, in server/live mode only the persona-backed needs are offered;
+    // the rest are offline-demo only, so selecting them can't silently practise as another person.
+    const available = state.enrolled
+      ? NEEDS.filter(([k]) => (state.enrolled.needs || []).includes(k))
+      : NEEDS.filter(([k]) => needKeysFor().includes(k));
     const grid = h('div', { class: 'pl-needs', role: 'radiogroup', 'aria-label': 'What is hard right now? Pick one.' });
     available.forEach(([key, title, desc, emoji], i) => {
       const pressed = state.needs.has(key);
@@ -292,21 +336,23 @@
       ));
     });
     app.append(
-      modeSelector(),
       h('h1', { class: 'pl-prompt' }, 'What is hard right now?'),
-      h('p', { class: 'pl-muted' }, 'Pick the one that fits best. You can change it later.'),
+      h('p', { class: 'pl-muted' }, state.enrolled ? 'This is set up for you by your therapist.' : 'Pick the one that fits best. You can change it later.'),
       grid);
-    if (isRemote() && available.length < NEEDS.length) app.append(h('p', { class: 'pl-muted' }, 'More practice types are available in the offline demo.'));
-    app.append(h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!isLive()) { client = makeClient(); } show('P1'); } } }, 'Next'));
+    if (!state.enrolled && isRemote() && available.length < NEEDS.length) app.append(h('p', { class: 'pl-muted' }, 'More practice types are available in the offline demo.'));
+    app.append(modeSelector());   // below the needs list, directly above Next
+    app.append(h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!isLive()) { stopClient(); client = makeClient(); } show('P1'); } } }, 'Next'));
   }
 
   // Voice vs Chat picker (first screen). Voice uses the microphone; Chat uses the on-screen
   // controls and shows no microphone UI. The choice selects the transport for the session.
   function setSessionMode(m) {
     if (state.sessionMode === m) return;
-    if (client) { try { client.stop('stop'); } catch (e) {} client = null; }  // drop any half-built driver
+    stopClient();   // drop any half-built driver (#3)
     state.sessionMode = m;
-    const avail = needKeysFor();
+    // Clear a selected need only if the new mode can't offer it. An enrolled patient's need is
+    // fixed by the server (and may not be persona-backed), so never clear it on a Voice/Chat switch.
+    const avail = state.enrolled ? (state.enrolled.needs || []) : needKeysFor();
     if (state.needs.size && ![...state.needs].every(k => avail.includes(k))) state.needs = new Set();
     render();
   }
@@ -327,7 +373,7 @@
   function screenP1(app) {
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
-        h('h1', { class: 'pl-prompt' }, 'Hi, Margaret.'),
+        h('h1', { class: 'pl-prompt' }, `Hi, ${state.enrolledName || 'Margaret'}.`),
         h('p', { class: 'pl-muted' }, "I'm an AI practice partner. We talk, and I wait for you."),
         h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, isLive() ? icon('mic', 24) : null, isLive() ? 'Start talking' : 'Start chatting'),
         h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.waits.sessionMin = 5; show('P2'); } }, 'Short chat (5 minutes)'),
@@ -351,12 +397,25 @@
     if (!client) client = makeClient();
     state.ended = null;
     state.captions = []; state.today = [];
-    if (isRemote() && !loadPatientToken()) { state.settingsNote = ''; show('LOGIN'); return; }  // sign in before a session
+    // #6: don't force the login screen up front — a server that doesn't require enrolment would
+    // then be unreachable. Let the session request itself tell us (a 401 below routes to sign-in).
     if (isRemote()) {
       state.connecting = true; render();  // show "Connecting…" until the first prompt arrives
       try { await client.start(); state.sessionActive = true; }
       catch (e) {
-        if (e && e.status === 401) { savePatientToken(''); state.settingsNote = ''; show('LOGIN'); return; }  // token/device no longer valid
+        if (e && e.status === 401) {
+          // A 401 can mean the device isn't enrolled — but it can also mean we raced ahead of (or
+          // briefly missed) /api/session/me. If the device IS enrolled, pin the real person and
+          // retry once before dropping an already-enrolled patient back to the sign-in screen.
+          if (!state.enrolled) {
+            try { applyEnrolled(await fetchMe()); } catch (_) { /* genuinely not enrolled */ }
+            if (state.enrolled) {
+              stopClient(); client = makeClient();
+              try { await client.start(); state.sessionActive = true; return; } catch (retryErr) { e = retryErr; }
+            }
+          }
+          if (!e || e.status === 401) { savePatientToken(''); clearEnrolled(); state.settingsNote = ''; show('LOGIN'); return; }
+        }
         if (isLive()) { state.safety = null; show('P9'); return; }  // mic blocked
         state.connecting = false;
         pushCaption('listener', 'Could not reach the server. Is patient-listener-server running?');
@@ -498,7 +557,6 @@
       h('p', { class: 'pl-disclosure' }, 'If speech, face or arm change suddenly, call 999. For slower changes, talk to your doctor or speech therapist.'),
       h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P0') }, 'Back to start')));
   }
-  function screenP6(app) { screenEnd(app); }
 
   // ---- REST ----
   function screenRest(app) {
@@ -515,11 +573,17 @@
   // keeps the choices local. The server only allows lengthening or switching a wait off.
   function screenP7(app) {
     const w = state.waits;
-    const pill = (label, active, fn) => h('button', { 'aria-pressed': String(active), onclick: fn }, label);
+    // #5: over a live session the server treats a *shorten* as a protocol error and closes the
+    // socket (it never sends a "rejected" message), so the client must never send one. We already
+    // refuse a shorten locally in changeWait; additionally, disable every pill until the server's
+    // authoritative values have arrived, so a change can never be computed from stale/absent data.
+    const hydrating = isRemote() && state.sessionActive && !state.serverSettings;
+    const pill = (label, active, fn) => h('button', { 'aria-pressed': String(active), disabled: hydrating ? '' : null, onclick: fn }, label);
     app.append(
       topbar(),
       h('h1', { class: 'pl-prompt' }, 'Settings'),
       h('p', { class: 'pl-muted' }, 'You can always make waits longer or switch them off. No PIN needed for these.'));
+    if (hydrating && !state.settingsNote) app.append(h('p', { role: 'status', class: 'pl-disclosure' }, 'Loading your current settings…'));
     if (state.settingsNote) app.append(h('p', { role: 'status', class: 'pl-disclosure' }, state.settingsNote));
     app.append(
       h('div', { class: 'pl-setting' },
@@ -582,8 +646,11 @@
     app.append(h('div', { class: 'pl-screen pl-screen--center pl-state' },
       h('div', { class: 'pl-ring', 'data-mode': 'resting', 'aria-hidden': 'true' }, icon('mic', 40)),
       h('h1', { class: 'pl-prompt' }, 'Microphone is blocked'),
-      h('p', { class: 'pl-state__what' }, 'Allow the microphone in your browser, then tap below.'),
-      h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again')));
+      h('p', { class: 'pl-state__what' }, 'Allow the microphone in your browser, then tap below. You can also practise by chat instead.'),
+      h('div', { class: 'pl-btn-row' },
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again'),
+        // Escape the voice path if the mic can't be used (or voice isn't available here).
+        h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { setSessionMode('chat'); show('P0'); } }, 'Use chat instead'))));
   }
 
   // ---- theme toggle (light default, remembered in localStorage; respects the user's choice) ----
@@ -636,4 +703,8 @@
   // ---- boot ----
   initTheme();
   render();
+  // #2: if this device is already enrolled, learn who it belongs to and show that patient's real
+  // need(s) on P0 instead of the persona picker. Failure (not enrolled / no such endpoint) is fine
+  // — the picker stays and sign-in is only prompted if the session request is rejected.
+  if (isRemote()) { fetchMe().then((me) => { applyEnrolled(me); if (state.route === 'P0') render(); }).catch(() => {}); }
 })();

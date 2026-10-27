@@ -637,16 +637,26 @@
       S.person = cl.caseload[0]?.id || '';
       await Promise.all(cl.caseload.map(async (p) => {
         const person = encodeURIComponent(p.id);
-        const [w, g, s, c] = await Promise.all([
-          api(`words/${person}`),
-          S.role === 'therapist' ? api(`grid/${person}`) : Promise.resolve({ days: [], rows: [] }),
-          api(`settings/${person}`),
-          api(`consent/${person}`),
-        ]);
-        DATA.words[p.id] = w.words;
-        DATA.grid[p.id] = { days: g.days, rows: g.rows };
-        DATA.settings[p.id] = s;
-        DATA.consent[p.id] = c;
+        try {
+          const [w, g, s, c] = await Promise.all([
+            api(`words/${person}`),
+            S.role === 'therapist' ? api(`grid/${person}`) : Promise.resolve({ days: [], rows: [] }),
+            api(`settings/${person}`),
+            api(`consent/${person}`),
+          ]);
+          DATA.words[p.id] = w.words;
+          DATA.grid[p.id] = { days: g.days, rows: g.rows };
+          DATA.settings[p.id] = s;
+          DATA.consent[p.id] = c;
+        } catch (error) {
+          if (!accessToken) throw error;   // the token was revoked mid-load (401) -> abort sign-in
+          // One patient's details failing must not blank the whole console: keep them listed with
+          // safe defaults so the caseload and the other patients still load.
+          DATA.words[p.id] = DATA.words[p.id] || [];
+          DATA.grid[p.id] = DATA.grid[p.id] || { days: [], rows: [] };
+          DATA.settings[p.id] = DATA.settings[p.id] || { needs: [] };
+          DATA.consent[p.id] = DATA.consent[p.id] || {};
+        }
       }));
   }
 

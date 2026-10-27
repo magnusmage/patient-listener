@@ -181,6 +181,7 @@ class LiveDriver extends EventTarget {
     this.person = 'margaret'; this.ws = null; this.ctx = null; this.node = null;
     this.stream = null; this.source = null; this.stopped = false; this.muted = false;
     this.audioId = null; this.needs = []; this._captureSignature = null;
+    this.ended = false;   // a terminal event was already delivered; suppress the onclose duplicate (#4)
   }
   setProfile(need) { this.person = NEED_TO_PERSON[need] || 'margaret'; this.needs = [need]; }
   async start() {
@@ -229,7 +230,8 @@ class LiveDriver extends EventTarget {
         this.ws.onclose = () => {
           reject(new Error('Voice connection closed'));
           this.stop();
-          this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+          // Don't fire a second, summary-less 'ended' if the server already sent ended/safety (#4).
+          if (!this.ended) { this.ended = true; this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } })); }
         };
       });
     } catch (error) { this.stop(); throw error; }
@@ -276,7 +278,8 @@ class LiveDriver extends EventTarget {
     }
     if (message.type === 'audioIdle') { this.audioId = null; this.mute(false); }
     if (message.type === 'voiceError') { this.stop(); return; }
-    if (message.type === 'safety' || message.type === 'ended') this.stop();
+    // Mark terminal so the forthcoming socket close doesn't overwrite this event's summary (#4).
+    if (message.type === 'safety' || message.type === 'ended') { this.ended = true; this.stop(); }
     this.dispatchEvent(new CustomEvent(message.type, { detail: message }));
   }
   _send(obj) { if (!this.stopped && this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj)); }
@@ -309,7 +312,12 @@ class LiveDriver extends EventTarget {
  * The on-screen demo controls stay visible and map to messages the server resolves against the
  * current target, so the backend decides everything. Enabled when window.PL_API is set (the
  * patient app sets it to same-origin when served over http). */
-const NEED_TO_PERSON = { finding_words: 'margaret', words_out: 'daniyal', being_heard: 'joseph' };
+const NEED_TO_PERSON = {
+  finding_words: 'margaret',
+  words_out: 'daniyal',
+  being_heard: 'joseph',
+  saving_energy: 'demo-amina'
+};
 
 function patientDeviceId() {
   const key = 'patient-listener-device-id';
@@ -332,7 +340,7 @@ function patientDeviceId() {
 }
 
 class ServerDriver extends EventTarget {
-  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; this.device = patientDeviceId(); }
+  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; this.device = patientDeviceId(); this.ended = false; }
 
   setProfile(needKey) { this.person = NEED_TO_PERSON[needKey] || 'margaret'; }
 
@@ -346,8 +354,9 @@ class ServerDriver extends EventTarget {
       this.ws = new WebSocket(`${ws_url}?token=${encodeURIComponent(token)}&device=${encodeURIComponent(this.device)}`);
       this.ws.onopen = () => { this.ws.send(JSON.stringify({ type: 'start' })); resolve(); };
       this.ws.onerror = (e) => reject(e);
-      this.ws.onmessage = (e) => { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); };
-      this.ws.onclose = () => this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+      this.ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'ended' || m.type === 'safety') this.ended = true; this.dispatchEvent(new CustomEvent(m.type, { detail: m })); };
+      // Don't fire a second, summary-less 'ended' if the server already sent ended/safety (#4).
+      this.ws.onclose = () => { if (!this.ended) { this.ended = true; this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } })); } };
     });
   }
 
