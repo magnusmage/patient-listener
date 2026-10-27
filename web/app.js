@@ -5,13 +5,23 @@
 
 (function () {
   const root = document.getElementById('pl-root');
-  const mode = window.PLClient.mode();   // 'demo' | 'server' | 'audio'
-  const live = mode === 'audio';         // mic + audio path; hides the demo controls
-  const remote = mode !== 'demo';        // uses a network driver; start() is async
+  // The transport is chosen on the first screen (Voice vs Chat), not fixed at load. `baseMode`
+  // only seeds a sensible default and resolves what "Chat" connects to. Voice is always the mic
+  // (audio) path; Chat is the text/logic path (server when served by the app server, else demo).
+  const baseMode = window.PLClient.mode();   // 'demo' | 'server' | 'audio' (honours ?demo=1 / ?server=1)
+  // What "Chat" connects to: keep whatever non-voice transport plMode resolved (so ?demo=1 stays
+  // fully offline); only when the app opened straight into Voice do we pick the text fallback.
+  const chatDriverMode = baseMode !== 'audio' ? baseMode : ((window.PL_API != null) ? 'server' : 'demo');
   const judge = new URLSearchParams(location.search).get('mode') === 'judge';
+  const effectiveMode = () => state.sessionMode === 'voice' ? 'audio' : chatDriverMode;
+  const isLive = () => effectiveMode() === 'audio';    // mic + audio path; hides the chat controls
+  const isRemote = () => effectiveMode() !== 'demo';   // uses a network driver; start() is async
+  const ALL_NEEDS = ['finding_words', 'words_out', 'being_heard', 'being_clear', 'saving_energy'];
+  const needKeysFor = () => isRemote() ? window.PLClient.remoteNeeds : ALL_NEEDS;
 
   const state = {
     route: 'P0',
+    sessionMode: baseMode === 'audio' ? 'voice' : 'chat',   // Voice (mic) vs Chat (on-screen), picked on P0
     needs: new Set(),
     waits: { backchannel: 4, offer: 7, max: 20, endByDone: false, sessionMin: 20 },
     feedback: 'word_found',
@@ -70,8 +80,9 @@
 
   // ---- client wiring ----
   function makeClient() {
-    const c = mode === 'audio' ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
-            : mode === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
+    const em = effectiveMode();
+    const c = em === 'audio' ? new window.PLClient.LiveDriver(window.PL_WS_URL, window.PL_TOKEN)
+            : em === 'server' ? new window.PLClient.ServerDriver(window.PL_API)
             : new window.PLClient.DemoEngine();
     c.setProfile([...state.needs][0] || 'finding_words');
     const on = (type, fn) => c.addEventListener(type, (e) => {
@@ -87,7 +98,7 @@
     on('voiceNotice', (d) => { pushCaption('listener', d.text); });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
     on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
-    on('state', (d) => { state.ringMode = d.state; updateRing(); });
+    on('state', (d) => { state.ringMode = d.state; if (d.state === 'resting' && state.route === 'P3') render(); else updateRing(); });
     on('backchannel', (d) => { pushCaption('listener', d.caption); });
     on('offerHint', () => { state.ringMode = 'hint_offered'; pushCaption('listener', 'Want a hint?'); state.offerHint = true; show('P3'); });
     on('hint', (d) => { state.hint = d; state.offerHint = false; pushCaption('listener', d.text); show('P3'); });
@@ -134,7 +145,7 @@
 
   function openSettings() {
     state.settingsNote = '';
-    if (remote && state.sessionActive && client) client.getSettings();  // hydrate from the server
+    if (isRemote() && state.sessionActive && client) client.getSettings();  // hydrate from the server
     show('P7');
   }
 
@@ -143,7 +154,7 @@
   // The server only permits lengthening or switching a wait off; a shorten is a protocol error
   // that closes the socket, so the client must never send one. Guard before every send.
   function changeWait(serverField, localField, value) {
-    if (!(remote && state.sessionActive && client)) { state.waits[localField] = value; state.settingsNote = ''; render(); return; }
+    if (!(isRemote() && state.sessionActive && client)) { state.waits[localField] = value; state.settingsNote = ''; render(); return; }
     if (!state.serverSettings) { state.settingsNote = 'One moment…'; client.getSettings(); render(); return; }
     const cur = state.serverSettings[serverField];
     if (value !== null && (cur == null || value < cur)) {
@@ -153,7 +164,7 @@
   }
 
   function setEndByDone(off) {
-    if (!(remote && state.sessionActive && client)) { state.waits.endByDone = off; state.settingsNote = ''; render(); return; }
+    if (!(isRemote() && state.sessionActive && client)) { state.waits.endByDone = off; state.settingsNote = ''; render(); return; }
     if (!state.serverSettings) { state.settingsNote = 'One moment…'; client.getSettings(); render(); return; }
     if (off) { state.settingsNote = 'Saving…'; client.extendSettings({ max_wait_s: null }); render(); return; }
     if (state.serverSettings.max_wait_s === null) {
@@ -267,7 +278,7 @@
     ];
     // In server/live mode only the needs backed by a seeded persona are offered; the rest are
     // offline-demo only, so selecting them no longer silently practises as a different person.
-    const available = remote ? NEEDS.filter(([k]) => window.PLClient.remoteNeeds.includes(k)) : NEEDS;
+    const available = NEEDS.filter(([k]) => needKeysFor().includes(k));
     const grid = h('div', { class: 'pl-needs', role: 'radiogroup', 'aria-label': 'What is hard right now? Pick one.' });
     available.forEach(([key, title, desc, emoji], i) => {
       const pressed = state.needs.has(key);
@@ -281,11 +292,35 @@
       ));
     });
     app.append(
+      modeSelector(),
       h('h1', { class: 'pl-prompt' }, 'What is hard right now?'),
       h('p', { class: 'pl-muted' }, 'Pick the one that fits best. You can change it later.'),
       grid);
-    if (remote && available.length < NEEDS.length) app.append(h('p', { class: 'pl-muted' }, 'More practice types are available in the offline demo.'));
-    app.append(h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!live) { client = makeClient(); } show('P1'); } } }, 'Next'));
+    if (isRemote() && available.length < NEEDS.length) app.append(h('p', { class: 'pl-muted' }, 'More practice types are available in the offline demo.'));
+    app.append(h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!isLive()) { client = makeClient(); } show('P1'); } } }, 'Next'));
+  }
+
+  // Voice vs Chat picker (first screen). Voice uses the microphone; Chat uses the on-screen
+  // controls and shows no microphone UI. The choice selects the transport for the session.
+  function setSessionMode(m) {
+    if (state.sessionMode === m) return;
+    if (client) { try { client.stop('stop'); } catch (e) {} client = null; }  // drop any half-built driver
+    state.sessionMode = m;
+    const avail = needKeysFor();
+    if (state.needs.size && ![...state.needs].every(k => avail.includes(k))) state.needs = new Set();
+    render();
+  }
+  function modeSelector() {
+    const opt = (key, label, desc) => h('button', {
+      role: 'radio', 'aria-checked': String(state.sessionMode === key), 'aria-pressed': String(state.sessionMode === key),
+      'aria-label': `${label}: ${desc}`, onclick: () => setSessionMode(key),
+    }, label);
+    return h('div', { class: 'pl-setting' },
+      h('div', { class: 'pl-setting__row' },
+        h('span', {}, 'How do you want to talk?'),
+        h('span', { class: 'pl-pill', role: 'radiogroup', 'aria-label': 'How do you want to talk?' },
+          opt('voice', 'Voice', 'speak out loud with your microphone'),
+          opt('chat', 'Chat', 'no microphone — use the on-screen buttons'))));
   }
 
   // ---- P1: start ----
@@ -294,7 +329,7 @@
       h('div', { class: 'pl-screen pl-screen--center' },
         h('h1', { class: 'pl-prompt' }, 'Hi, Margaret.'),
         h('p', { class: 'pl-muted' }, "I'm an AI practice partner. We talk, and I wait for you."),
-        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, icon('mic', 24), 'Start talking'),
+        h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, isLive() ? icon('mic', 24) : null, isLive() ? 'Start talking' : 'Start chatting'),
         h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.waits.sessionMin = 5; show('P2'); } }, 'Short chat (5 minutes)'),
         disclosure(),
       ));
@@ -302,12 +337,13 @@
 
   // ---- P2: mic check ----
   function screenP2(app) {
+    const chat = !isLive();   // Chat mode shows no microphone wording or icons.
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
-        h('h1', { class: 'pl-prompt' }, 'Can you hear me?'),
-        h('p', { class: 'pl-muted', role: 'status' }, state.connecting ? 'Connecting to your practice session…' : (live ? 'Tap to allow the microphone, then say hello.' : 'No microphone needed — use the on-screen controls.')),
-        h('div', { class: 'pl-ring', 'data-mode': state.connecting ? 'speaking' : 'listening', 'aria-hidden': 'true' }, icon('mic', 40)),
-        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', disabled: state.connecting ? '' : null, onclick: beginSession }, icon('mic', 22), state.connecting ? 'Connecting…' : 'Yes, start'),
+        h('h1', { class: 'pl-prompt' }, chat ? 'Ready to chat?' : 'Can you hear me?'),
+        h('p', { class: 'pl-muted', role: 'status' }, state.connecting ? 'Connecting to your practice session…' : (chat ? 'No microphone needed — use the on-screen buttons.' : 'Tap to allow the microphone, then say hello.')),
+        h('div', { class: 'pl-ring', 'data-mode': state.connecting ? 'speaking' : 'listening', 'aria-hidden': 'true' }, chat ? '💬' : icon('mic', 40)),
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', disabled: state.connecting ? '' : null, onclick: beginSession }, chat ? null : icon('mic', 22), state.connecting ? 'Connecting…' : (chat ? 'Start' : 'Yes, start')),
       ));
   }
 
@@ -315,13 +351,13 @@
     if (!client) client = makeClient();
     state.ended = null;
     state.captions = []; state.today = [];
-    if (remote && !loadPatientToken()) { state.settingsNote = ''; show('LOGIN'); return; }  // sign in before a session
-    if (remote) {
+    if (isRemote() && !loadPatientToken()) { state.settingsNote = ''; show('LOGIN'); return; }  // sign in before a session
+    if (isRemote()) {
       state.connecting = true; render();  // show "Connecting…" until the first prompt arrives
       try { await client.start(); state.sessionActive = true; }
       catch (e) {
         if (e && e.status === 401) { savePatientToken(''); state.settingsNote = ''; show('LOGIN'); return; }  // token/device no longer valid
-        if (live) { state.safety = null; show('P9'); return; }  // mic blocked
+        if (isLive()) { state.safety = null; show('P9'); return; }  // mic blocked
         state.connecting = false;
         pushCaption('listener', 'Could not reach the server. Is patient-listener-server running?');
         render();
@@ -363,7 +399,11 @@
 
     // Actions: one main action per profile + Stop (in the topbar)
     const row = h('div', { class: 'pl-btn-row' });
-    if (p.calibration) {
+    if (state.ringMode === 'resting') {
+      // Resting: a clear way back in, so the flow never dead-ends on the "Resting" chip.
+      row.append(h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => client.resume() }, 'Start again'));
+      row.append(h('button', { class: 'pl-btn pl-btn--secondary', onclick: endSession }, 'Finish for now'));
+    } else if (p.calibration) {
       row.append(h('button', {class: 'pl-btn pl-btn--primary', disabled: state.calibrationReady ? null : '',
         onclick: () => { state.calibrationReady = false; client.calibrationNext(); render(); }}, 'Use this phrase'));
       row.append(h('button', {class: 'pl-btn pl-btn--secondary', onclick: () => client.calibrationSkip()}, 'Practise without voice level'));
@@ -384,7 +424,7 @@
     }
     app.append(row);
 
-    if (!live) app.append(demoControls(profile));
+    if (!isLive()) app.append(demoControls(profile));
   }
 
   function hintCard() {
@@ -423,17 +463,17 @@
       h('p', { class: 'pl-hint-text' }, `“${state.whatIHeard}”`));
   }
 
-  // Demo-only controls standing in for the microphone / ASR.
+  // Chat controls — on-screen buttons that take the person's turn without a microphone.
   function demoControls(profile) {
     const mk = (label, fn) => h('button', { class: 'pl-tab', onclick: fn }, label);
     const row = h('div', { class: 'pl-tabs', style: 'margin-top:6px' });
-    row.append(h('span', { class: 'pl-locked' }, 'Demo controls (stand in for the mic): '));
-    row.append(mk('⏸ pause', () => client.beginPause()));
-    if (profile !== 'words_out') row.append(mk('🎤 say the word', () => client.sayWord()));
-    if (profile === 'finding_words') row.append(mk('🎤 say a close word', () => client.saySoundAlike()));
-    if (profile === 'finding_words') row.append(mk('🎤 say something else', () => client.saySomethingElse()));
-    if (profile === 'words_out' || profile === 'being_heard' || profile === 'being_clear' || profile === 'saving_energy') row.append(mk('🎤 speak', () => client.typed(profile === 'words_out' ? 'I had a good weekend thanks' : 'hello there')));
-    if (profile === 'words_out') row.append(mk('🎤 get stuck', () => client.typed('I I I')));
+    row.append(h('span', { class: 'pl-locked' }, 'Tap to reply: '));
+    row.append(mk('pause', () => client.beginPause()));
+    if (profile !== 'words_out') row.append(mk('say the word', () => client.sayWord()));
+    if (profile === 'finding_words') row.append(mk('say a close word', () => client.saySoundAlike()));
+    if (profile === 'finding_words') row.append(mk('say something else', () => client.saySomethingElse()));
+    if (profile === 'words_out' || profile === 'being_heard' || profile === 'being_clear' || profile === 'saving_energy') row.append(mk('speak', () => client.typed(profile === 'words_out' ? 'I had a good weekend thanks' : 'hello there')));
+    if (profile === 'words_out') row.append(mk('get stuck', () => client.typed('I I I')));
     row.append(mk('⚠ say a stroke phrase', () => client.strokePhrase()));
     return row;
   }
@@ -567,7 +607,7 @@
   function judgePanel() {
     const box = h('div', { class: 'pl-app', style: 'margin-top:8px' },
       h('h2', { class: 'pl-topbar__title' }, 'J1 — live trace (judge mode)'),
-      h('p', { class: 'pl-muted' }, live ? `Live: ${window.PL_WS_URL}` : mode === 'server' ? 'Live server — the real controller decides over a WebSocket.' : 'Demo / replay mode — no model is called.'),
+      h('p', { class: 'pl-muted' }, isLive() ? `Live voice: ${window.PL_WS_URL || '(server-issued endpoint)'}` : effectiveMode() === 'server' ? 'Chat (live server) — the real controller decides over a WebSocket.' : 'Chat (demo / replay) — no model is called.'),
       h('div', { id: 'pl-trace', class: 'pl-trace' }));
     setTimeout(() => { const t = document.getElementById('pl-trace'); if (t) renderTrace(t); }, 0);
     return box;
