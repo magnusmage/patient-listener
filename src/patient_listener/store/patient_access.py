@@ -82,6 +82,16 @@ class PatientAccess:
             (pid,hashed_device,key(credential),now().isoformat())).fetchone()
         return row['authorization_id'] if row and self.store.person_exists(pid) else None
 
+    def person_for_credential(self, device, credential):
+        """Recover the sole enrolled identity from a device-bound cookie, not a URL."""
+        hashed_device = device_key(device)
+        if not isinstance(credential, str) or not 32 <= len(credential) <= 128 or not credential.isascii():
+            return None
+        row = self.db.execute(
+            'SELECT person_id FROM patient_devices WHERE device_hash=? AND secret_hash=? AND expires_at>?',
+            (hashed_device, key(credential), now().isoformat())).fetchone()
+        return row['person_id'] if row and self.store.person_exists(row['person_id']) else None
+
     def active(self, pid, device, authorization_id):
         if not authorization_id:
             return False

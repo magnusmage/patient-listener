@@ -54,9 +54,12 @@ async def me(access: Access) -> dict:
 
 
 @router.post("/logout")
-async def logout(request: Request, access: Access) -> dict:
-    token = request.headers["authorization"].partition(" ")[2]
-    access.store.revoke_console_token(token)
+async def logout(access: Access) -> dict:
+    """Acknowledge local sign-out; clients clear their stored token and patient data.
+
+    Provisioned access tokens remain reusable until their original expiry or explicit
+    administrative revocation/replacement. This endpoint does not extend their TTL.
+    """
     return {"ok": True}
 
 

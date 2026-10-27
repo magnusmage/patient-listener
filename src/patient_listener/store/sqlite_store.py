@@ -815,7 +815,11 @@ class SqliteStore(SqlStore):
     """SQLite development adapter; PostgreSQL uses the same operations and FSRS library."""
     def __init__(self, path: str = ":memory:", check_same_thread: bool = True,
                  *, ai_enabled: bool | None = None, schedule_settings=None) -> None:
-        self._db = sqlite3.connect(path, check_same_thread=check_same_thread)
+        # Python 3.12 statement-cache reuse on a shared connection can corrupt
+        # concurrent fetch results (CPython #118172), including console identities.
+        # FastAPI sync dependencies run on worker threads; never cache statements.
+        self._db = sqlite3.connect(path, check_same_thread=check_same_thread,
+                                   cached_statements=0)
         self._db.row_factory = sqlite3.Row
         self._db.executescript("PRAGMA journal_mode=WAL;" + _SCHEMA)
         if 'profile' not in {row[1] for row in self._db.execute('PRAGMA table_info(hint_audio)')}:
