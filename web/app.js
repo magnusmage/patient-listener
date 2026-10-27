@@ -232,8 +232,8 @@
     state.settingsNote = ''; state.signingIn = true; render();
     try {
       await enrollDevice(code); savePatientToken(code);
-      try { applyEnrolled(await fetchMe()); } catch (e) { /* session will still resolve the person */ }
-      await beginSession();
+      try { applyEnrolled(await fetchMe()); } catch (e) { /* needs fall back to the picker */ }
+      show('P0');   // signed in → selection screen (needs from /me + voice/chat), then the usual flow
     }
     catch (e) { state.settingsNote = e.message; }
     finally { state.signingIn = false; if (state.route === 'LOGIN') render(); }
@@ -272,7 +272,11 @@
   function render() {
     root.innerHTML = '';
     const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
-    app.append(themeToggle());
+    // Navbar cluster in the top-right corner: Sign out (once signed in) sits next to the theme toggle.
+    const nav = h('div', { class: 'pl-navbar' });
+    if (state.enrolled && state.route !== 'LOGIN') nav.append(logoutButton());
+    nav.append(themeToggle());
+    app.append(nav);
     const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9, LOGIN: screenLogin };
     (screens[state.route] || screenP0)(app);
     root.append(app);
@@ -700,11 +704,38 @@
 
   function endSession() { if (client) client.stop('stop'); state.sessionActive = false; state.ended = state.ended || { found: state.today.slice() }; show('END'); }
 
+  // Local sign-out: forget this device's stored token and patient data and return to the login
+  // screen. The server's httpOnly device cookie can't be cleared from JS, so refreshing an enrolled
+  // device signs back in automatically — this is a web-only logout.
+  function logout() {
+    stopClient();
+    savePatientToken('');
+    clearEnrolled();
+    state.needs = new Set();
+    state.sessionActive = false;
+    state.serverSettings = null;
+    state.ended = null;
+    state.settingsNote = '';
+    show('LOGIN');
+  }
+  function logoutButton() {
+    return h('button', { class: 'pl-tab pl-logout', onclick: logout, 'aria-label': 'Sign out' }, 'Sign out');
+  }
+
   // ---- boot ----
   initTheme();
+  // Login is the landing screen in server/live mode; demo mode has no sign-in. An already-enrolled
+  // device auto-skips to the selection screen below (via /me), so the login screen only gates a
+  // fresh or signed-out device.
+  if (isRemote()) state.route = 'LOGIN';
   render();
   // #2: if this device is already enrolled, learn who it belongs to and show that patient's real
-  // need(s) on P0 instead of the persona picker. Failure (not enrolled / no such endpoint) is fine
-  // — the picker stays and sign-in is only prompted if the session request is rejected.
-  if (isRemote()) { fetchMe().then((me) => { applyEnrolled(me); if (state.route === 'P0') render(); }).catch(() => {}); }
+  // need(s) on the selection screen (P0) instead of the login screen. Failure (not enrolled / no
+  // such endpoint) leaves the login screen up so the patient can sign in.
+  if (isRemote()) {
+    fetchMe().then((me) => {
+      applyEnrolled(me);
+      if (state.enrolled && state.route === 'LOGIN') show('P0');
+    }).catch(() => {});
+  }
 })();

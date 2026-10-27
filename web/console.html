@@ -282,6 +282,19 @@
       h('span', { class: 'con-badge' }, 'generated'),
       h('span', { style: 'flex:1;min-width:200px;font-size:15px' },
         `${pr.plan_items} item${pr.plan_items === 1 ? '' : 's'} planned${pr.rendered_clips ? ` · ${pr.rendered_clips} clips` : ''}.`)));
+    // Therapist-set options for this generation. render_audio is fixed on and not shown.
+    if (!S.planForm) S.planForm = { max_words: 1, use_ai: false };
+    const pf = S.planForm;
+    const aiPill = (label, active, val) => h('button', { 'aria-pressed': String(active), disabled: S.busy ? '' : null, onclick: () => { pf.use_ai = val; render(); } }, label);
+    card.append(
+      h('div', { class: 'pl-setting' },
+        h('div', { class: 'pl-setting__row' },
+          h('span', {}, 'How many words (1–4)'),
+          h('input', { id: 'plan-max-words', class: 'con-input', type: 'number', min: '1', max: '4', step: '1', value: String(pf.max_words), style: 'width:92px;margin-bottom:0', 'aria-label': 'Maximum words, 1 to 4', oninput: e => { pf.max_words = e.target.value; } }))),
+      h('div', { class: 'pl-setting' },
+        h('div', { class: 'pl-setting__row' },
+          h('span', {}, 'Use AI for hint wording'),
+          h('span', { class: 'pl-pill' }, aiPill('Off', !pf.use_ai, false), aiPill('On', pf.use_ai, true)))));
     card.append(h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: generatePlan }, S.busyAction === 'plan' ? 'Generating…' : 'Generate plan'));
     const n = DATA.nightly[S.person];
     if (n === undefined) { loadNightly().then(render); }
@@ -294,11 +307,16 @@
 
   async function generatePlan() {
     if (API == null) { S.error = 'Plan generation needs the live server.'; render(); return; }
+    const pf = S.planForm || { max_words: 1, use_ai: false };
+    const maxWords = parseInt(pf.max_words, 10);
+    if (!Number.isInteger(maxWords) || maxWords < 1 || maxWords > 4) {
+      S.error = 'Enter a number of words from 1 to 4.'; render(); return;
+    }
     S.busy = true; S.busyAction = 'plan'; S.error = ''; S.planResult = null; render();
     try {
       const data = await api(`plans/${encodeURIComponent(S.person)}/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ max_words: 3, use_ai: false, render_audio: false })
+        body: JSON.stringify({ max_words: maxWords, use_ai: !!pf.use_ai, render_audio: true })
       });
       S.planResult = { person: S.person, data };
       showNotice(`Plan ready — ${data.plan_items} item${data.plan_items === 1 ? '' : 's'}`);

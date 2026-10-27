@@ -331,3 +331,6 @@ table.pl-grid th { background: var(--pl-caption-bg); }
 .pl-swatch__chip { height: 56px; }
 .pl-swatch__name { padding: 6px 8px; }
 .pl-theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 60; }
+/* Patient navbar cluster (top-right): Sign out sits next to the theme toggle. */
+.pl-navbar { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; align-items: center; gap: var(--pl-space-1); }
+.pl-navbar .pl-theme-toggle { position: static; top: auto; right: auto; }

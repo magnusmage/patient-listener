@@ -126,7 +126,9 @@ class DemoEngine extends EventTarget {
   _heard(text) {
     if (this.safetyStopped) return;
     this._clear();
-    this._emit('caption', { who: 'you', text });
+    // Being loud (loudness) practises voice level, not words — it never shows a transcript of what
+    // was said, matching the server. Safety below still runs on the text regardless.
+    if (this.profile.feedback !== 'loudness') this._emit('caption', { who: 'you', text });
     if (STROKE.test(text)) { this._emit('safety', { card: 'stroke_signs', title: 'Call 999 now', body: 'Sudden changes in speech, face or arm need help now.', number: '999' }); return; }
     if (DISTRESS.test(text)) { this._emit('safety', { card: 'distress', title: 'You are not alone', body: 'If you are struggling, you can call Samaritans on 116 123.', number: '116 123' }); return; }
 
