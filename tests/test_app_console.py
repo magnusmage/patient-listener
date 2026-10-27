@@ -158,8 +158,25 @@ class ConsoleApiTests(unittest.TestCase):
             self.assertEqual(self.client.post(
                 "/api/console/words/margaret/w-leo/approve", headers=headers).status_code, 403)
 
-    def test_logout_revokes_token(self):
+    def test_logout_preserves_token_and_original_expiry(self):
+        store = self.client.app.state.pl.store
+        before = [dict(row) for row in store._db.execute("SELECT * FROM console_tokens")]
+        for _ in range(2):
+            self.assertEqual(self.client.post("/api/console/logout").status_code, 200)
+            self.assertEqual(self.client.get("/api/console/me").status_code, 200)
+        after = [dict(row) for row in store._db.execute("SELECT * FROM console_tokens")]
+        self.assertEqual(after, before)
+
+    def test_expiry_and_admin_revocation_still_apply_after_logout(self):
+        store = self.client.app.state.pl.store
         self.assertEqual(self.client.post("/api/console/logout").status_code, 200)
+        store._db.execute("UPDATE console_tokens SET expires_at='2000-01-01T00:00:00+00:00'")
+        store._db.commit()
+        self.assertEqual(self.client.get("/api/console/me").status_code, 401)
+        self.assertEqual(self.client.post("/api/console/logout").status_code, 401)
+        self.client.headers.update(self.identity("replacement", "therapist", ["demo-margaret"]))
+        self.assertEqual(self.client.post("/api/console/logout").status_code, 200)
+        store.revoke_console_tokens("replacement")
         self.assertEqual(self.client.get("/api/console/me").status_code, 401)
 
     def test_expired_credentials_and_revoked_credentials_are_rejected(self):

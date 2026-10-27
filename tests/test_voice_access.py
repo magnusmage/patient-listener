@@ -49,3 +49,36 @@ class VoiceAccessTests(unittest.TestCase):
                     with client.websocket_connect(self.url(client,'daniyal')) as ws:
                         ws.send_json({'type':'start'})
                         self.assertEqual(ws.receive_json()['type'],'greeting')
+
+
+class RepeatedVoiceCleanupTests(unittest.TestCase):
+    def test_reselection_style_disconnects_release_slots_and_close_session_timers(self):
+        sessions=[]
+        closed=[]
+        class RecordingConnection(FakeConnection):
+            def __init__(self,runtime,session,socket,send):
+                super().__init__(runtime,session,socket,send)
+                self.session=session
+                sessions.append(session)
+            async def close(self):closed.append(self.session)
+        cfg=Settings(ai_enabled=False,nebius_api_key='',voice_enabled=True)
+        with patch('patient_listener.app.server.VoiceRuntime.load',return_value=MagicMock()), patch(
+            'patient_listener.app.server.VoiceConnection',RecordingConnection):
+            with TestClient(create_app(cfg)) as client:
+                registry=client.app.state.pl.sessions
+                for person in ('margaret','daniyal')*4:
+                    response=client.get('/api/session?person='+person,
+                        headers={'X-PL-Device':'a'*48})
+                    token=response.json()['token']
+                    with client.websocket_connect('/ws?token='+token+'&device='+'a'*48+'&voice=true') as ws:
+                        ws.send_json({'type':'start'})
+                        self.assertEqual(ws.receive_json()['type'],'greeting')
+                    self.assertFalse(client.portal.call(registry.active,'demo-'+person))
+                    self.assertFalse(client.portal.call(registry.active,'__gpu_voice__'))
+                    session=sessions[-1]
+                    self.assertTrue(session.ended)
+                    self.assertIsNone(session._cap)
+                    self.assertIsNone(session._ticker)
+                    self.assertIsNone(session._advance)
+                self.assertEqual(len(sessions),8)
+                self.assertEqual(closed,sessions)

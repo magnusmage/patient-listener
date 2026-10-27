@@ -100,6 +100,25 @@ def _patient(request: Request, person: str) -> tuple:
     return state, pid
 
 
+@router.get('/api/session/me')
+async def enrolled_patient(request: Request):
+    """Restore the enrolled browser's patient and merged needs without a persona guess."""
+    from ..profile_settings import profile_values
+    _transport(request)
+    state = request.app.state.pl
+    try:
+        pid = PatientAccess(state.store).person_for_credential(
+            request.headers.get('x-pl-device', ''), request.cookies.get(COOKIE, ''))
+    except ValueError:
+        pid = None
+    if pid is None:
+        raise HTTPException(401, 'Device setup is required')
+    cfg = state.store.person_pause(pid)
+    return JSONResponse({'person_id': pid, 'name': state.store.person_name(pid),
+                         'needs': sorted(need.value for need in cfg.needs),
+                         'settings': profile_values(cfg)}, headers={'Cache-Control': 'no-store'})
+
+
 @router.get('/api/session/settings')
 async def patient_settings(request: Request, person: str = 'margaret'):
     from ..profile_settings import profile_values
