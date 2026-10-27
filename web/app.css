@@ -142,7 +142,7 @@ img, svg, canvas { max-width: 100%; height: auto; }
   width: 100%; aspect-ratio: 16 / 10; max-height: 26vh; border-radius: var(--pl-radius-card);
   background: var(--pl-tile); border: 4px solid var(--pl-primary);
   display: flex; align-items: center; justify-content: center;
-  color: var(--pl-muted); font-size: 44px; overflow: hidden;
+  color: var(--pl-muted); font-size: 88px; line-height: 1; overflow: hidden;
 }
 
 /* --- Mic circle (first-use / mic check): pine ring, calm --- */
@@ -184,6 +184,13 @@ img, svg, canvas { max-width: 100%; height: auto; }
   flex: 1; min-height: var(--pl-target); font-size: var(--pl-text-body-size);
   padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line-strong);
   border-radius: var(--pl-radius-input); background: var(--pl-surface); color: var(--pl-text);
+}
+/* Single-line text input (device setup code). Same anatomy as the type-to-talk field. */
+.pl-input {
+  width: 100%; min-height: var(--pl-target); font-size: var(--pl-text-body-size);
+  padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line-strong);
+  border-radius: var(--pl-radius-input); background: var(--pl-surface); color: var(--pl-text);
+  margin-bottom: var(--pl-space-2);
 }
 
 /* --- Hint card: amber, distinct from practice (prototype) --- */

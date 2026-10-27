@@ -1193,11 +1193,14 @@ window.PLClient = {
       h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again')));
   }
 
-  // ---- theme toggle ----
+  // ---- theme toggle (light default, remembered in localStorage; respects the user's choice) ----
+  const THEME_KEY = 'pl-theme';
+  function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); try { window.localStorage.setItem(THEME_KEY, theme); } catch (e) {} }
+  (function () { let theme = 'light'; try { const saved = window.localStorage.getItem(THEME_KEY); if (saved === 'light' || saved === 'dark') theme = saved; } catch (e) {} document.documentElement.setAttribute('data-theme', theme); })();
   function themeToggle() {
-    const cur = document.documentElement.getAttribute('data-theme') || 'system';
-    const next = { system: 'light', light: 'dark', dark: 'system' };
-    return h('button', { class: 'pl-tab pl-theme-toggle', onclick: () => { const n = next[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n); render(); }, 'aria-label': `Theme: ${cur}. Tap to change.` }, cur === 'dark' ? '🌙' : cur === 'light' ? '☀️' : '🌗');
+    const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    const next = cur === 'dark' ? 'light' : 'dark';  // one click flips light <-> dark
+    return h('button', { class: 'pl-tab pl-theme-toggle', onclick: () => { applyTheme(next); render(); }, 'aria-label': `Theme: ${cur}. Switch to ${next}.` }, cur === 'dark' ? '🌙' : '☀️');
   }
 
   // ---- judge J1 trace ----

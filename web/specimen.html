@@ -149,10 +149,12 @@
         sw.append(chip, name); box.append(sw);
       }
     }
-    const order = { system: 'light', light: 'dark', dark: 'system' };
+    const THEME_KEY = 'pl-theme';
+    function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); try { window.localStorage.setItem(THEME_KEY, theme); } catch (e) {} }
+    (function () { let theme = 'light'; try { const saved = window.localStorage.getItem(THEME_KEY); if (saved === 'light' || saved === 'dark') theme = saved; } catch (e) {} document.documentElement.setAttribute('data-theme', theme); })();
     document.getElementById('theme').addEventListener('click', () => {
-      const cur = document.documentElement.getAttribute('data-theme') || 'system';
-      const n = order[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n);
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      applyTheme(cur === 'dark' ? 'light' : 'dark');  // one click flips light <-> dark
       paint();
     });
     paint();

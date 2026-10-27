@@ -27,6 +27,11 @@
     ended: null,
     trace: [],
     t0: Date.now(),
+    sessionActive: false,   // a remote WebSocket session is live (settings persist over it)
+    serverSettings: null,   // authoritative wait values from the server (null until fetched)
+    settingsNote: '',       // transient note on the Settings screen
+    connecting: false,      // starting a remote session (session fetch + WebSocket handshake)
+    signingIn: false,       // redeeming a token on the Sign in screen
   };
 
   let client = null;
@@ -103,11 +108,83 @@
       show('P8');
     });
     on('ended', (d) => {
+      state.sessionActive = false;
       if (state.ended && state.ended.reason === 'safety') return;
       state.ended = d; show('END');
     });
     on('attempt', () => {});
+    // Patient-owned wait settings (P7), read and saved over the session WebSocket.
+    on('settings', (d) => { applyServerSettings(d.settings); if (state.route === 'P7') render(); });
+    on('settingsSaved', (d) => { applyServerSettings(d.settings); state.settingsNote = 'Saved. Applies to this and the next session.'; if (state.route === 'P7') render(); });
+    on('settingsRejected', (d) => { state.settingsNote = d.reason || 'You can make a wait longer or switch it off, not shorter.'; if (state.route === 'P7') render(); });
     return c;
+  }
+
+  // Reflect the server's authoritative wait values into the local Settings view.
+  function applyServerSettings(s) {
+    if (!s) return;
+    state.serverSettings = s;
+    const w = state.waits;
+    w.backchannel = s.backchannel_s;
+    w.offer = s.offer_hint_s;
+    w.max = s.max_wait_s;
+    w.endByDone = s.max_wait_s === null;   // no automatic end-of-turn
+    w.sessionMin = s.max_session_min;
+  }
+
+  function openSettings() {
+    state.settingsNote = '';
+    if (remote && state.sessionActive && client) client.getSettings();  // hydrate from the server
+    show('P7');
+  }
+
+  // Apply a wait change: locally in demo, or over the live session (guarding against shortening,
+  // which the server rejects — see FR patient-owned settings).
+  // The server only permits lengthening or switching a wait off; a shorten is a protocol error
+  // that closes the socket, so the client must never send one. Guard before every send.
+  function changeWait(serverField, localField, value) {
+    if (!(remote && state.sessionActive && client)) { state.waits[localField] = value; state.settingsNote = ''; render(); return; }
+    if (!state.serverSettings) { state.settingsNote = 'One moment…'; client.getSettings(); render(); return; }
+    const cur = state.serverSettings[serverField];
+    if (value !== null && (cur == null || value < cur)) {
+      state.settingsNote = 'You can make a wait longer or switch it off, not shorter.'; render(); return;
+    }
+    state.settingsNote = 'Saving…'; client.extendSettings({ [serverField]: value }); render();
+  }
+
+  function setEndByDone(off) {
+    if (!(remote && state.sessionActive && client)) { state.waits.endByDone = off; state.settingsNote = ''; render(); return; }
+    if (!state.serverSettings) { state.settingsNote = 'One moment…'; client.getSettings(); render(); return; }
+    if (off) { state.settingsNote = 'Saving…'; client.extendSettings({ max_wait_s: null }); render(); return; }
+    if (state.serverSettings.max_wait_s === null) {
+      state.settingsNote = 'Auto-end is off. Turning it back on is set by your helper.'; render(); return;
+    }
+    render();  // already on; nothing to change
+  }
+
+  // Patient sign-in token (the device setup code). Persisted so the device stays signed in; the
+  // server's httpOnly device cookie is the real credential, this marks that sign-in happened and
+  // is cleared on any auth error so the patient is sent back to the login screen.
+  const PATIENT_TOKEN_KEY = 'patient-listener-token';
+  function loadPatientToken() { try { return window.localStorage.getItem(PATIENT_TOKEN_KEY) || ''; } catch (e) { return ''; } }
+  function savePatientToken(value) { try { if (value) window.localStorage.setItem(PATIENT_TOKEN_KEY, value); else window.localStorage.removeItem(PATIENT_TOKEN_KEY); } catch (e) {} }
+
+  async function enrollDevice(code) {
+    const base = (typeof window.PL_API === 'string') ? window.PL_API : '';
+    const resp = await fetch(`${base}/api/patient/enroll`, {
+      method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-PL-Device': window.PLClient.patientDeviceId() },
+      body: JSON.stringify({ setup_code: code }),
+    });
+    if (!resp.ok) throw new Error('That code did not work. Ask your helper for a new one.');
+  }
+  async function submitEnroll() {
+    const code = (document.getElementById('pl-setup-code').value || '').trim();
+    if (!code) return;
+    state.settingsNote = ''; state.signingIn = true; render();
+    try { await enrollDevice(code); savePatientToken(code); await beginSession(); }
+    catch (e) { state.settingsNote = e.message; }
+    finally { state.signingIn = false; if (state.route === 'LOGIN') render(); }
   }
 
   function pushCaption(who, text) {
@@ -138,13 +215,13 @@
   }
 
   // ---- routing ----
-  function show(route) { if (state.safety && route !== 'P8') return; state.route = route; render(); }
+  function show(route) { if (state.safety && route !== 'P8') return; state.connecting = false; state.route = route; render(); }
 
   function render() {
     root.innerHTML = '';
     const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
     app.append(themeToggle());
-    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9 };
+    const screens = { P0: screenP0, P1: screenP1, P2: screenP2, P3: screenP3, P5: screenP5, P6: screenP6, P7: screenP7, P8: screenEnd, REST: screenRest, END: screenEnd, P9: screenP9, LOGIN: screenLogin };
     (screens[state.route] || screenP0)(app);
     root.append(app);
     if (state.route === 'P8' && state.safety) overlaySafety();
@@ -166,6 +243,7 @@
     const suffix = state.prompt && prof ? ' · ' + prof.label.toLowerCase() : '';
     return h('div', { class: 'pl-topbar' },
       h('div', { class: 'pl-topbar__title' }, 'AI practice partner' + suffix),
+      h('button', { class: 'pl-tab', onclick: openSettings, 'aria-label': 'Settings' }, 'Settings'),
       h('button', { class: 'pl-stop', onclick: endSession, 'aria-label': 'Stop practice' }, icon('stop', 18), 'Stop'),
     );
   }
@@ -187,8 +265,11 @@
       ['being_clear', 'Being clear', 'My speech is hard to catch. I will show you what I heard and check.', '📝'],
       ['saving_energy', 'Getting tired', 'Talking tires me. I will keep it short and offer rests.', '🌙'],
     ];
+    // In server/live mode only the needs backed by a seeded persona are offered; the rest are
+    // offline-demo only, so selecting them no longer silently practises as a different person.
+    const available = remote ? NEEDS.filter(([k]) => window.PLClient.remoteNeeds.includes(k)) : NEEDS;
     const grid = h('div', { class: 'pl-needs', role: 'radiogroup', 'aria-label': 'What is hard right now? Pick one.' });
-    NEEDS.forEach(([key, title, desc, emoji], i) => {
+    available.forEach(([key, title, desc, emoji], i) => {
       const pressed = state.needs.has(key);
       grid.append(h('button', {
         class: 'pl-need', role: 'radio', 'aria-checked': String(pressed), 'aria-pressed': String(pressed), 'data-autofocus': i === 0 ? '' : null,
@@ -202,9 +283,9 @@
     app.append(
       h('h1', { class: 'pl-prompt' }, 'What is hard right now?'),
       h('p', { class: 'pl-muted' }, 'Pick the one that fits best. You can change it later.'),
-      grid,
-      h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!live) { client = makeClient(); } show('P1'); } } }, 'Next'),
-    );
+      grid);
+    if (remote && available.length < NEEDS.length) app.append(h('p', { class: 'pl-muted' }, 'More practice types are available in the offline demo.'));
+    app.append(h('button', { class: 'pl-btn pl-btn--primary', disabled: state.needs.size === 0 ? '' : null, onclick: () => { if (state.needs.size) { if (!live) { client = makeClient(); } show('P1'); } } }, 'Next'));
   }
 
   // ---- P1: start ----
@@ -224,9 +305,9 @@
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
         h('h1', { class: 'pl-prompt' }, 'Can you hear me?'),
-        h('p', { class: 'pl-muted' }, live ? 'Tap to allow the microphone, then say hello.' : 'No microphone needed — use the on-screen controls.'),
-        h('div', { class: 'pl-ring', 'data-mode': 'listening', 'aria-hidden': 'true' }, icon('mic', 40)),
-        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: beginSession }, icon('mic', 22), 'Yes, start'),
+        h('p', { class: 'pl-muted', role: 'status' }, state.connecting ? 'Connecting to your practice session…' : (live ? 'Tap to allow the microphone, then say hello.' : 'No microphone needed — use the on-screen controls.')),
+        h('div', { class: 'pl-ring', 'data-mode': state.connecting ? 'speaking' : 'listening', 'aria-hidden': 'true' }, icon('mic', 40)),
+        h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', disabled: state.connecting ? '' : null, onclick: beginSession }, icon('mic', 22), state.connecting ? 'Connecting…' : 'Yes, start'),
       ));
   }
 
@@ -234,14 +315,19 @@
     if (!client) client = makeClient();
     state.ended = null;
     state.captions = []; state.today = [];
+    if (remote && !loadPatientToken()) { state.settingsNote = ''; show('LOGIN'); return; }  // sign in before a session
     if (remote) {
-      try { await client.start(); }
+      state.connecting = true; render();  // show "Connecting…" until the first prompt arrives
+      try { await client.start(); state.sessionActive = true; }
       catch (e) {
+        if (e && e.status === 401) { savePatientToken(''); state.settingsNote = ''; show('LOGIN'); return; }  // token/device no longer valid
         if (live) { state.safety = null; show('P9'); return; }  // mic blocked
+        state.connecting = false;
         pushCaption('listener', 'Could not reach the server. Is patient-listener-server running?');
+        render();
         return;
       }
-    } else { client.start(); }
+    } else { client.start(); state.sessionActive = false; }
   }
 
   // ---- P3 / P3b: talk ----
@@ -385,26 +471,43 @@
   }
 
   // ---- P7: settings ----
+  // Remote (server/live) with a live session: reads/writes the server over the WebSocket. Demo
+  // keeps the choices local. The server only allows lengthening or switching a wait off.
   function screenP7(app) {
     const w = state.waits;
     const pill = (label, active, fn) => h('button', { 'aria-pressed': String(active), onclick: fn }, label);
     app.append(
       topbar(),
       h('h1', { class: 'pl-prompt' }, 'Settings'),
-      h('p', { class: 'pl-muted' }, 'You can always make waits longer or switch them off. No PIN needed for these.'),
+      h('p', { class: 'pl-muted' }, 'You can always make waits longer or switch them off. No PIN needed for these.'));
+    if (state.settingsNote) app.append(h('p', { role: 'status', class: 'pl-disclosure' }, state.settingsNote));
+    app.append(
       h('div', { class: 'pl-setting' },
         h('div', { class: 'pl-setting__row' }, h('span', {}, 'How long I wait before a gentle “mm”'),
-          h('span', { class: 'pl-pill' }, pill('4s', w.backchannel === 4, () => { w.backchannel = 4; render(); }), pill('6s', w.backchannel === 6, () => { w.backchannel = 6; render(); }), pill('10s', w.backchannel === 10, () => { w.backchannel = 10; render(); }), pill('Never', w.backchannel === null, () => { w.backchannel = null; render(); })))),
+          h('span', { class: 'pl-pill' }, pill('4s', w.backchannel === 4, () => changeWait('backchannel_s', 'backchannel', 4)), pill('6s', w.backchannel === 6, () => changeWait('backchannel_s', 'backchannel', 6)), pill('10s', w.backchannel === 10, () => changeWait('backchannel_s', 'backchannel', 10)), pill('Never', w.backchannel === null, () => changeWait('backchannel_s', 'backchannel', null))))),
       h('div', { class: 'pl-setting' },
         h('div', { class: 'pl-setting__row' }, h('span', {}, 'End my turn for me'),
-          h('span', { class: 'pl-pill' }, pill('After a wait', !w.endByDone, () => { w.endByDone = false; render(); }), pill("Never — I'll tap Done", w.endByDone, () => { w.endByDone = true; render(); })))),
+          h('span', { class: 'pl-pill' }, pill('After a wait', !w.endByDone, () => setEndByDone(false)), pill("Never — I'll tap Done", w.endByDone, () => setEndByDone(true))))),
       h('div', { class: 'pl-setting' },
         h('div', { class: 'pl-setting__row' }, h('span', {}, 'Session length'),
-          h('span', { class: 'pl-pill' }, pill('10 min', w.sessionMin === 10, () => { w.sessionMin = 10; render(); }), pill('20 min', w.sessionMin === 20, () => { w.sessionMin = 20; render(); }), pill('No limit', w.sessionMin === null, () => { w.sessionMin = null; render(); })))),
+          h('span', { class: 'pl-pill' }, pill('10 min', w.sessionMin === 10, () => changeWait('max_session_min', 'sessionMin', 10)), pill('20 min', w.sessionMin === 20, () => changeWait('max_session_min', 'sessionMin', 20)), pill('No limit', w.sessionMin === null, () => changeWait('max_session_min', 'sessionMin', null))))),
       h('div', { class: 'pl-setting' },
         h('p', { class: 'pl-locked' }, '🔒 Needs, hint timing, shortening limits and consent are behind your helper’s PIN.')),
-      h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show(state.prompt ? 'P3' : 'P1') }, 'Done'),
+      h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => { state.settingsNote = ''; show(state.prompt ? 'P3' : 'P1'); } }, 'Done'),
     );
+  }
+
+  // ---- LOGIN: patient sign-in before a session. The token is a device setup code from the
+  // therapist/helper; a successful sign-in links this device and is remembered in localStorage,
+  // so the patient stays signed in until an auth error sends them back here.
+  function screenLogin(app) {
+    app.append(h('div', { class: 'pl-screen pl-screen--center' },
+      h('h1', { class: 'pl-prompt' }, 'Sign in'),
+      h('p', { class: 'pl-muted' }, 'Enter the access token your therapist or helper gave you. This device stays signed in afterwards.'),
+      h('input', { id: 'pl-setup-code', class: 'pl-input', type: 'password', 'aria-label': 'Access token', autocomplete: 'off', spellcheck: 'false', placeholder: 'Access token', 'data-autofocus': '' }),
+      state.settingsNote ? h('p', { role: 'alert', class: 'pl-disclosure' }, state.settingsNote) : null,
+      h('button', { class: 'pl-btn pl-btn--primary', disabled: state.signingIn ? '' : null, onclick: submitEnroll }, state.signingIn ? 'Signing in…' : 'Sign in'),
+      h('button', { class: 'pl-btn pl-btn--secondary', disabled: state.signingIn ? '' : null, onclick: () => { state.settingsNote = ''; show('P2'); } }, 'Back')));
   }
 
   // ---- P8: safety overlay (alertdialog) ----
@@ -429,6 +532,7 @@
 
   function dismissSafety() {
     state.safety = null;
+    state.sessionActive = false;
     client = null; // Further practice must create a fresh session explicitly.
     show('END');
   }
@@ -442,11 +546,21 @@
       h('button', { class: 'pl-btn pl-btn--primary', 'data-autofocus': '', onclick: () => show('P2') }, 'Try again')));
   }
 
-  // ---- theme toggle ----
+  // ---- theme toggle (light default, remembered in localStorage; respects the user's choice) ----
+  const THEME_KEY = 'pl-theme';
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { window.localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+  }
+  function initTheme() {
+    let theme = 'light';  // white by default, overriding the OS preference
+    try { const saved = window.localStorage.getItem(THEME_KEY); if (saved === 'light' || saved === 'dark') theme = saved; } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  }
   function themeToggle() {
-    const cur = document.documentElement.getAttribute('data-theme') || 'system';
-    const next = { system: 'light', light: 'dark', dark: 'system' };
-    return h('button', { class: 'pl-tab pl-theme-toggle', onclick: () => { const n = next[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n); render(); }, 'aria-label': `Theme: ${cur}. Tap to change.` }, cur === 'dark' ? '🌙' : cur === 'light' ? '☀️' : '🌗');
+    const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    const next = cur === 'dark' ? 'light' : 'dark';  // one click flips light <-> dark
+    return h('button', { class: 'pl-tab pl-theme-toggle', onclick: () => { applyTheme(next); render(); }, 'aria-label': `Theme: ${cur}. Switch to ${next}.` }, cur === 'dark' ? '🌙' : '☀️');
   }
 
   // ---- judge J1 trace ----
@@ -477,8 +591,9 @@
     return '';
   }
 
-  function endSession() { if (client) client.stop('stop'); state.ended = state.ended || { found: state.today.slice() }; show('END'); }
+  function endSession() { if (client) client.stop('stop'); state.sessionActive = false; state.ended = state.ended || { found: state.today.slice() }; show('END'); }
 
   // ---- boot ----
+  initTheme();
   render();
 })();

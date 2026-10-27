@@ -23,7 +23,7 @@
     .con-foot { margin-top: auto; padding: 14px 8px 4px; border-top: 1px solid var(--pl-line); }
     .con-avatar { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 999px; background: var(--pl-tile); color: var(--pl-primary); font-weight: 700; font-size: 13px; }
     .con-signout { margin-top: 10px; width: 100%; background: none; border: 1px solid var(--pl-line-strong); border-radius: 9px; padding: 8px; color: var(--pl-muted); font: 600 13px var(--pl-font); cursor: pointer; }
-    .con-main { flex: 1; min-width: 0; padding: 28px 32px; overflow: auto; }
+    .con-main { flex: 1; min-width: 0; padding: 60px 32px 28px; overflow: auto; }  /* top padding clears the floating theme button */
     .con-sechead { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
     .con-h1 { font-weight: 700; font-size: 28px; margin: 0; }
     .con-h2 { font-weight: 700; font-size: 24px; margin: 0; }
@@ -44,6 +44,7 @@
     .con-addrow { display: flex; gap: 10px; align-items: center; }
     .con-addrow .con-input { margin-bottom: 0; flex: 1; }
     .con-alert { background: var(--pl-danger-bg); border: 1px solid var(--pl-danger); color: var(--pl-danger); border-radius: 12px; padding: 12px 16px; font-size: 15px; margin: 0 0 14px; }
+    .con-notice { background: var(--pl-good-bg); border: 1px solid var(--pl-primary); color: var(--pl-primary); border-radius: 12px; padding: 12px 16px; font-size: 15px; margin: 0 0 14px; font-weight: 600; }
     .con-sign { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
     .con-signlogo { width: 60px; height: 60px; border-radius: 16px; font-weight: 700; font-size: 22px; margin-bottom: 14px; }
     .con-signbtn { width: 100%; background: var(--pl-primary); color: var(--pl-on-primary); border: none; border-radius: 12px; padding: 16px; font: 600 18px var(--pl-font); cursor: pointer; }
@@ -51,7 +52,7 @@
     .con-delete { background: #96222A; color: #fff; border: none; border-radius: 999px; padding: 11px 24px; font: 600 15px var(--pl-font); cursor: pointer; }
     @media (max-width: 720px) {
       .con-shell { flex-direction: column; min-height: 0; }
-      .con-side { width: auto; border-right: none; border-bottom: 1px solid var(--pl-line); }
+      .con-side { width: auto; border-right: none; border-bottom: 1px solid var(--pl-line); padding-top: 54px; }
       .con-nav { flex-direction: row; flex-wrap: wrap; }
       .con-foot { margin-top: 12px; }
       .con-main { padding: 20px 16px; }
@@ -61,14 +62,20 @@
   </style>
 </head>
 <body>
-  <button class="pl-tab pl-theme-toggle" id="theme">🌗 theme</button>
+  <button class="pl-tab pl-theme-toggle" id="theme" aria-label="Theme">☀️</button>
   <main id="root" role="main"></main>
 
   <script>
   // Mock data is only used when explicitly opening the offline demo.
   const QUERY = new URLSearchParams(location.search);
   const API = (location.protocol.startsWith('http') && QUERY.get('mock') !== '1') ? '' : null;
-  let accessToken = ''; // Memory only: never URLs, localStorage or sessionStorage.
+  // The console token is persisted in localStorage so a therapist is not forced to re-enter it
+  // on every reload. It is a bearer credential: kept under one key, and cleared on sign-out or
+  // any 401. (Never placed in URLs.)
+  const TOKEN_KEY = 'patient-listener-console-token';
+  function loadToken() { try { return window.localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
+  function saveToken(value) { try { if (value) window.localStorage.setItem(TOKEN_KEY, value); else window.localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+  let accessToken = API != null ? loadToken() : '';
   const DATA = {
     therapist: { name: 'Sam (SLT)' },
     caseload: [
@@ -94,14 +101,23 @@
     },
     settings: { margaret: { needs: ['Finding the word'], hintOrder: 'meaning-first', hintWait: 7, sessionMin: 20 } },
     consent: { margaret: { tellCarerLowMood: false, dataSharing: true } },
+    devices: {}, nightly: {}, invite: null,
   };
   const CELL = { check: ['✓', 'pl-cell--check', 'found with no hint'], meaning: ['M', 'pl-cell--hint', 'found after meaning hint'], sound: ['S', 'pl-cell--hint', 'found after sound hint'], word: ['W', 'pl-cell--hint', 'found after hearing the word'], none: ['–', 'pl-cell--none', 'not tried'] };
 
   const root = document.getElementById('root');
-  const S = { signedIn: false, tab: 'T2', person: 'margaret', role: 'therapist', demo: API == null, error: '', busy: false, phraseDraft: '' };
+  const S = { signedIn: false, tab: 'T2', person: 'margaret', role: 'therapist', demo: API == null, error: '', busy: false, busyAction: '', busyId: '', notice: '', phraseDraft: '' };
+  let noticeTimer = null;
+  // Transient success feedback so an action never finishes silently.
+  function showNotice(message) {
+    S.notice = message; S.error = '';
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { S.notice = ''; if (S.signedIn) render(); }, 3200);
+  }
   function clearData() {
-    S.phraseDraft = '';
+    S.phraseDraft = ''; S.planResult = null; S.notice = ''; S.busyAction = ''; S.busyId = '';
     DATA.caseload = []; DATA.words = {}; DATA.grid = {}; DATA.settings = {}; DATA.consent = {};
+    DATA.devices = {}; DATA.nightly = {}; DATA.invite = null;
   }
   if (API != null) clearData();
 
@@ -112,14 +128,15 @@
     return e;
   }
 
-  const NAV = [['T2', 'Caseload'], ['T3', 'Word list'], ['T4', 'Progress'], ['T5', 'Profile & hints'], ['T6', 'Consent & export']];
+  const NAV = [['T2', 'Caseload'], ['T3', 'Word list'], ['T4', 'Progress'], ['T5', 'Profile & hints'], ['T7', 'Devices'], ['T6', 'Consent & export']];
 
   function render() {
     root.innerHTML = '';
     if (!S.signedIn) return root.append(signinScreen());
     const main = h('div', { class: 'con-main' });
     if (S.error) main.append(h('p', { role: 'alert', class: 'con-alert' }, S.error));
-    main.append((({ T2: t2, T3: t3, T4: t4, T5: t5, T6: t6 }[S.tab]) || t2)());
+    else if (S.notice) main.append(h('p', { role: 'status', class: 'con-notice' }, '✓ ' + S.notice));
+    main.append((({ T2: t2, T3: t3, T4: t4, T5: t5, T6: t6, T7: t7 }[S.tab]) || t2)());
     root.append(h('div', { class: 'con-shell' }, sidebar(), main));
   }
 
@@ -158,7 +175,7 @@
       h('p', { class: 'pl-muted', style: 'font-size:16px;margin:0 0 24px' }, API == null ? 'Offline demo — sample data only.' : 'Sign in to your caseload.'),
       API != null ? h('input', { id: 'access-token', class: 'con-input', type: 'password', 'aria-label': 'Console access token', autocomplete: 'off', spellcheck: 'false', placeholder: 'Access token' }) : null,
       S.error ? h('p', { role: 'alert', class: 'con-alert' }, S.error) : null,
-      h('button', { class: 'con-signbtn', 'data-autofocus': '', disabled: S.busy ? '' : null, onclick: () => signIn(false) }, API == null ? 'Enter offline demo' : 'Sign in'),
+      h('button', { class: 'con-signbtn', 'data-autofocus': '', disabled: S.busy ? '' : null, onclick: () => signIn(false) }, S.busy ? 'Signing in…' : (API == null ? 'Enter offline demo' : 'Sign in')),
       (API != null && QUERY.get('mode') === 'judge') ? h('button', { class: 'con-demobtn', disabled: S.busy ? '' : null, onclick: () => signIn(true) }, 'One-click demo login') : null,
     );
     const wrap = h('div', { class: 'con-sign' }, card);
@@ -168,7 +185,7 @@
 
   // T2 caseload (prototype table)
   function t2() {
-    const cols = '1.4fr 1.6fr 1fr .9fr auto';
+    const cols = '1.4fr 1.6fr 1fr .9fr 104px';  // fixed action column so header and rows align
     const wrap = h('div', {});
     wrap.append(h('div', { class: 'con-sechead' },
       h('h1', { class: 'con-h1' }, 'Your caseload'),
@@ -199,7 +216,7 @@
       h('span', { class: 'con-badge' }, `draft from ${w.by || 'carer'}`),
       h('span', { style: 'flex:1;min-width:200px;font-size:16px' }, h('b', {}, w.text), w.cue ? ` — ${w.cue}` : '', w.first ? ` · starts with “${w.first}”` : ''),
       canApprove
-        ? h('button', { class: 'con-pill', onclick: () => approveWord(w) }, 'Approve')
+        ? h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: () => approveWord(w) }, S.busyId === w.id ? 'Approving…' : 'Approve')
         : h('span', { class: 'pl-muted' }, 'Therapist approval required'))));
     const approved = words.filter(w => w.status !== 'draft');
     if (approved.length) {
@@ -209,7 +226,7 @@
         h('span', {}, 'Word'), h('span', {}, 'Meaning cue'), h('span', {}, 'First sound'), h('span', {}, 'Kind')));
       approved.forEach(w => card.append(h('div', { class: 'con-row', style: `grid-template-columns:${cols}` },
         h('span', { style: 'font-weight:600;font-size:16px' }, w.text),
-        h('input', { class: 'con-cue', value: w.cue || '', 'aria-label': `Meaning cue for ${w.text}`, oninput: (e) => { w.cue = e.target.value; } }),
+        h('input', { class: 'con-cue', value: w.cue || '', maxlength: '90', 'aria-label': `Meaning cue for ${w.text}`, oninput: (e) => { w.cue = e.target.value; }, onchange: (e) => saveCue(w, e.target.value) }),
         h('span', { style: 'font-size:15px' }, w.first || '—'),
         h('span', { class: 'pl-muted', style: 'font-size:14px' }, w.kind || '—'))));
       wrap.append(card);
@@ -218,8 +235,23 @@
       h('div', { style: 'font-weight:700;font-size:16px;margin-bottom:10px' }, 'Add one of “my phrases” (up to 60 characters)'),
       h('div', { class: 'con-addrow' },
         h('input', { id: 'phrase', class: 'con-input', value: S.phraseDraft, oninput: e => { S.phraseDraft = e.target.value; }, 'aria-label': 'New phrase', maxlength: '60', placeholder: 'Can you open the window?' }),
-        h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: addPhrase }, S.busy ? 'Saving…' : 'Add draft'))));
+        h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: addPhrase }, S.busyAction === 'phrase' ? 'Adding…' : 'Add draft'))));
     return wrap;
+  }
+
+  // Persist a meaning-cue edit (PATCH /words/{person}/{word_id}). Offline keeps the local value.
+  async function saveCue(w, value) {
+    w.cue = value;
+    if (API == null) return;
+    S.error = '';
+    try {
+      const result = await api(`words/${encodeURIComponent(S.person)}/${encodeURIComponent(w.id)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meaning_cue: value.trim() })
+      });
+      Object.assign(w, result.word); showNotice(`Cue saved for “${w.text}”`);
+    } catch (error) { S.error = error.message; }
+    render();
   }
 
   // T4 progress grid
@@ -234,7 +266,111 @@
     g.rows.forEach(r => { const tr = h('tr', {}, h('th', { scope: 'row' }, r.word)); r.cells.forEach((c, i) => { const [sym, cls, label] = CELL[c]; tr.append(h('td', { class: 'pl-cell ' + cls, 'aria-label': `${r.word}, ${g.days[i]}: ${label}` }, sym)); }); body.append(tr); });
     table.append(body);
     wrap.append(h('div', { class: 'con-card', style: 'overflow-x:auto' }, h('div', { class: 'pl-grid-wrap' }, table)));
+    wrap.append(planCard());
     return wrap;
+  }
+
+  // Plan generation + nightly status (therapist Progress tab). Live server only.
+  function planCard() {
+    const card = h('div', { class: 'con-card', style: 'margin-top:16px' });
+    card.append(h('div', { style: 'font-weight:700;font-size:16px;margin-bottom:6px' }, "Today's practice plan"));
+    card.append(h('p', { class: 'pl-muted', style: 'font-size:14px;margin:0 0 10px' },
+      'Builds the next session from what is due. Templates only here — audio and model hints run on the deploy box.'));
+    if (API == null) { card.append(h('p', { class: 'pl-muted', style: 'font-size:14px;margin:0' }, 'Available on the live server.')); return card; }
+    const pr = S.planResult && S.planResult.person === S.person ? S.planResult.data : null;
+    if (pr) card.append(h('div', { class: 'con-draft', style: 'margin:0 0 12px' },
+      h('span', { class: 'con-badge' }, 'generated'),
+      h('span', { style: 'flex:1;min-width:200px;font-size:15px' },
+        `${pr.plan_items} item${pr.plan_items === 1 ? '' : 's'} planned${pr.rendered_clips ? ` · ${pr.rendered_clips} clips` : ''}.`)));
+    card.append(h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: generatePlan }, S.busyAction === 'plan' ? 'Generating…' : 'Generate plan'));
+    const n = DATA.nightly[S.person];
+    if (n === undefined) { loadNightly().then(render); }
+    else if (n) card.append(h('p', { class: 'pl-muted', style: 'font-size:13px;margin:12px 0 0' },
+      n.enabled
+        ? `Nightly plan: ${n.time} ${n.timezone}${n.scheduled_for_person ? ' · scheduled for this person' : ' · not scheduled for this person'}${n.runs && n.runs.length ? ` · last run ${shortDate(n.runs[n.runs.length - 1].at || n.runs[n.runs.length - 1].ran_at || '')}` : ''}.`
+        : 'Nightly plan generation is off.'));
+    return card;
+  }
+
+  async function generatePlan() {
+    if (API == null) { S.error = 'Plan generation needs the live server.'; render(); return; }
+    S.busy = true; S.busyAction = 'plan'; S.error = ''; S.planResult = null; render();
+    try {
+      const data = await api(`plans/${encodeURIComponent(S.person)}/generate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_words: 3, use_ai: false, render_audio: false })
+      });
+      S.planResult = { person: S.person, data };
+      showNotice(`Plan ready — ${data.plan_items} item${data.plan_items === 1 ? '' : 's'}`);
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; S.busyAction = ''; render(); }
+  }
+
+  async function loadNightly() {
+    if (API == null || DATA.nightly[S.person] !== undefined) return;
+    DATA.nightly[S.person] = null;  // sentinel: in flight, prevents re-fetch loop
+    try { DATA.nightly[S.person] = await api(`nightly/${encodeURIComponent(S.person)}`); }
+    catch (error) { DATA.nightly[S.person] = { enabled: false }; }
+  }
+
+  // T7 devices: link the patient's own device with a one-time setup code.
+  function t7() {
+    const wrap = h('div', {});
+    wrap.append(patientHeader(), h('div', { class: 'con-sechead' }, h('h2', { class: 'con-h2' }, 'Devices')));
+    wrap.append(h('p', { class: 'pl-muted', style: 'font-size:14px;margin:0 0 14px' },
+      'Link the patient’s own device so they can practise. A setup code is shown once and expires in 10 minutes.'));
+    if (API == null) { wrap.append(h('div', { class: 'con-card' }, h('p', { class: 'pl-muted', style: 'margin:0' }, 'Device linking is available on the live server.'))); return wrap; }
+    const inv = DATA.invite && DATA.invite.person === S.person ? DATA.invite : null;
+    if (inv) wrap.append(h('div', { class: 'con-draft', style: 'margin-bottom:14px' },
+      h('span', { class: 'con-badge' }, 'setup code'),
+      h('span', { style: 'flex:1;min-width:180px;font-size:15px;font-family:monospace;word-break:break-all' }, inv.setup_code),
+      h('button', { class: 'con-pill con-pill--ghost', onclick: () => { try { navigator.clipboard && navigator.clipboard.writeText(inv.setup_code); } catch (e) {} } }, 'Copy')));
+    wrap.append(h('div', { class: 'con-card', style: 'margin-bottom:14px' },
+      h('div', { style: 'font-weight:700;font-size:16px;margin-bottom:6px' }, 'Add a device'),
+      h('p', { class: 'pl-muted', style: 'font-size:14px;margin:0 0 10px' }, 'On the patient’s device, open the patient app and enter the code when asked.'),
+      h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: createInvite }, S.busyAction === 'invite' ? 'Creating…' : 'Create setup code')));
+    const devices = DATA.devices[S.person];
+    if (devices === undefined) { loadDevices().then(render); wrap.append(h('p', { class: 'pl-muted' }, 'Loading devices…')); return wrap; }
+    const cols = '1.6fr 1fr 1fr 124px';  // fixed action column so header and rows align
+    const card = h('div', { class: 'con-tablecard' });
+    card.append(h('div', { class: 'con-head', style: `grid-template-columns:${cols}` },
+      h('span', {}, 'Device'), h('span', {}, 'Linked'), h('span', {}, 'Expires'), h('span', {})));
+    if (!devices.length) card.append(h('div', { class: 'con-row' }, h('span', { class: 'pl-muted' }, 'No devices linked yet.')));
+    devices.forEach(d => card.append(h('div', { class: 'con-row', style: `grid-template-columns:${cols}` },
+      h('span', { style: 'font-family:monospace;font-size:12px;word-break:break-all' }, d.authorization_id),
+      h('span', { class: 'pl-muted', style: 'font-size:14px' }, shortDate(d.created_at)),
+      h('span', { class: 'pl-muted', style: 'font-size:14px' }, shortDate(d.expires_at)),
+      h('button', { class: 'con-pill con-pill--ghost', disabled: S.busy ? '' : null, onclick: () => revokeDevice(d.authorization_id) }, S.busyId === d.authorization_id ? 'Removing…' : 'Revoke'))));
+    wrap.append(card);
+    return wrap;
+  }
+
+  function shortDate(iso) { if (!iso) return '—'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleDateString(); }
+
+  async function createInvite() {
+    if (API == null) return;
+    S.busy = true; S.busyAction = 'invite'; S.error = ''; render();
+    try {
+      const result = await api(`patients/${encodeURIComponent(S.person)}/device-links`, { method: 'POST' });
+      DATA.invite = { person: S.person, setup_code: result.setup_code, expires_at: result.expires_at };
+      showNotice('Setup code created — share it with the patient');
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; S.busyAction = ''; render(); }
+  }
+
+  async function loadDevices() {
+    if (API == null) return;
+    DATA.devices[S.person] = DATA.devices[S.person] || [];
+    try { DATA.devices[S.person] = (await api(`patients/${encodeURIComponent(S.person)}/devices`)).devices; }
+    catch (error) { DATA.devices[S.person] = []; }  // 403 in demo; listing stays empty, no banner
+  }
+
+  async function revokeDevice(id) {
+    if (!window.confirm('Unlink this device? The patient will need a new setup code to practise on it.')) return;
+    S.busy = true; S.busyId = id; S.error = ''; render();
+    try { await api(`patients/${encodeURIComponent(S.person)}/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }); delete DATA.devices[S.person]; await loadDevices(); showNotice('Device unlinked'); }
+    catch (error) { S.error = error.message; }
+    finally { S.busy = false; S.busyId = ''; render(); }
   }
 
   // T5 profile & hint settings
@@ -288,6 +424,7 @@
           DATA.settings[person] = result;
           const entry = DATA.caseload.find(p => p.id === person);
           if (entry) entry.needs = result.needs;
+          showNotice('Settings saved');
         }
       } else {
         const s = DATA.settings[person] ||= {needs:[]};
@@ -307,7 +444,7 @@
 
   // T6 consent & export
   function t6() {
-    const c = DATA.consent[S.person] || { tellCarerLowMood: false, dataSharing: false };
+    const c = DATA.consent[S.person] || { tellCarerLowMood: false, dataSharing: false, shareWithTherapist: false };
     const toggle = (label, key) => h('div', { class: 'pl-setting' }, h('div', { class: 'pl-setting__row' }, h('span', {}, label),
       h('button', { class: 'pl-btn pl-btn--secondary', 'aria-pressed': String(c[key]), disabled: S.busy, onclick: () => saveConsent(key, !c[key]) }, c[key] ? 'On' : 'Off')));
     const wrap = h('div', {});
@@ -317,8 +454,8 @@
       toggle('Share practice data with my therapist', 'shareWithTherapist'),
       h('p', { class: 'pl-muted' }, 'Record the person’s own choices. A helper supports the decision.'),
       h('div', { class: 'pl-btn-row', style: 'margin-top:16px' },
-        h('button', { class: 'con-pill', onclick: exportCsv }, '⬇ Export CSV'),
-        h('button', { class: 'con-delete', onclick: deleteAll }, '🗑 Delete everything')),
+        h('button', { class: 'con-pill', disabled: S.busy ? '' : null, onclick: exportCsv }, S.busyAction === 'export' ? 'Exporting…' : '⬇ Export CSV'),
+        h('button', { class: 'con-delete', disabled: S.busy ? '' : null, onclick: deleteAll }, S.busyAction === 'delete' ? 'Deleting…' : '🗑 Delete everything')),
       h('p', { class: 'pl-muted' }, 'Export includes “my phrases” as plain text. Delete removes all words, photos and attempts within 24 hours.'));
     return wrap;
   }
@@ -330,25 +467,67 @@
     S.busy = true; S.error = ''; render();
     try {
       if (API == null) DATA.consent[person] = { ...DATA.consent[person], [key]: value };
-      else DATA.consent[person] = await api(`consent/${encodeURIComponent(person)}`, {
+      else { DATA.consent[person] = await api(`consent/${encodeURIComponent(person)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [key]: value, personConfirmed: true })
-      });
+      }); showNotice(value ? 'Consent recorded' : 'Consent withdrawn'); }
     } catch (error) { S.error = error.message; }
     finally { S.busy = false; render(); }
   }
 
-  function exportCsv() {
-    const words = DATA.words[S.person] || [];
-    let csv = 'type,word_or_phrase,kind\n';
-    words.forEach(w => { csv += `word,${JSON.stringify(w.text)},${w.kind}\n`; });
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${S.person}.csv`; a.click();
+  function downloadBlob(text, filename) {
+    const blob = new Blob([text], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 0);
   }
-  function deleteAll() {
-    // Second confirmation screen (DS-T07).
-    const ok = window.confirm('Delete everything for ' + name(S.person) + '? This cannot be undone.');
-    if (ok) { DATA.words[S.person] = []; alert('Deletion requested. Completes within 24 hours.'); render(); }
+
+  async function exportCsv() {
+    if (API == null) {
+      const words = DATA.words[S.person] || [];
+      let csv = 'type,word_or_phrase,kind\n';
+      words.forEach(w => { csv += `word,${JSON.stringify(w.text)},${w.kind}\n`; });
+      downloadBlob(csv, `${S.person}.csv`);
+      return;
+    }
+    if (!window.confirm('Export all of ' + name(S.person) + "'s data? Only do this at the person's request.")) return;
+    S.busy = true; S.busyAction = 'export'; S.error = ''; render();
+    try {
+      // The export returns text/csv (not JSON), so it uses a raw fetch rather than api().
+      const response = await fetch(`${API}/api/console/privacy/${encodeURIComponent(S.person)}/export`, {
+        method: 'POST', cache: 'no-store',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personConfirmed: true }),
+      });
+      if (!response.ok) { if (response.status === 401) { accessToken = ''; saveToken(''); S.signedIn = false; clearData(); } throw new Error(await failMessage(response)); }
+      downloadBlob(await response.text(), 'patient-listener-export.csv');
+      showNotice('Export downloaded');
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; S.busyAction = ''; render(); }
+  }
+
+  async function deleteAll() {
+    if (API == null) {
+      // Second confirmation screen (DS-T07).
+      if (window.confirm('Delete everything for ' + name(S.person) + '? This cannot be undone.')) {
+        DATA.words[S.person] = []; alert('Deletion requested. Completes within 24 hours.'); render();
+      }
+      return;
+    }
+    if (!window.confirm('Delete everything for ' + name(S.person) + '? This removes all words, photos and attempts and cannot be undone. Only do this at the person’s request.')) return;
+    const who = name(S.person);
+    S.busy = true; S.busyAction = 'delete'; S.error = ''; render();
+    try {
+      // Two steps: request a confirmation token, then confirm the deletion with it.
+      const req = await api(`privacy/${encodeURIComponent(S.person)}/deletion-request`, { method: 'POST' });
+      const receipt = await api(`privacy/${encodeURIComponent(S.person)}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personConfirmed: true, confirmationToken: req.confirmation_token }),
+      });
+      DATA.words[S.person] = [];
+      await hydrate(); S.tab = 'T2';
+      showNotice(`All data for ${who} deleted` + (receipt && receipt.receipt_id ? ` · receipt ${receipt.receipt_id}` : ''));
+    } catch (error) { S.error = error.message; }
+    finally { S.busy = false; S.busyAction = ''; render(); }
   }
 
   function name(id) { const p = DATA.caseload.find(x => x.id === id); return p ? p.name : id; }
@@ -356,17 +535,32 @@
   /* Live data from the app server's console API (GET /api/console/...). When opened from disk
    * (file://) or with ?mock=1, the mock DATA above is used instead, so the console still works
    * offline. */
+  async function failMessage(response) {
+    const body = await response.json().catch(() => ({}));
+    return typeof body.detail === 'string' ? body.detail
+      : response.status === 422 ? 'Check the word or phrase and try again.'
+      : 'Could not complete the request. Please try again.';
+  }
+
   async function api(path, options = {}) {
     const headers = { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` };
     const response = await fetch(`${API}/api/console/${path}`, { ...options, headers, cache: 'no-store' });
     if (!response.ok) {
       if (response.status === 401) {
-        accessToken = ''; S.signedIn = false; clearData();
+        accessToken = ''; saveToken(''); S.signedIn = false; clearData();
       }
-      const body = await response.json().catch(() => ({}));
-      throw new Error(typeof body.detail === 'string' ? body.detail : response.status === 422 ? 'Check the word or phrase and try again.' : 'Could not complete the request. Please try again.');
+      throw new Error(await failMessage(response));
     }
     return response.json();
+  }
+
+  // Load the caseload for the current accessToken. Shared by sign-in and the restore-on-load path.
+  async function enterConsole() {
+    const user = await api('me');
+    S.role = user.role; S.demo = user.demo;
+    await hydrate();
+    saveToken(accessToken);
+    S.signedIn = true; S.tab = 'T2';
   }
 
   async function signIn(demo) {
@@ -381,19 +575,16 @@
         if (!response.ok) throw new Error('Judge demo is unavailable on this server.');
         accessToken = (await response.json()).token;
       }
-      const user = await api('me');
-      S.role = user.role; S.demo = user.demo;
-      await hydrate();
-      S.signedIn = true; S.tab = 'T2';
+      await enterConsole();
     } catch (error) {
-      accessToken = ''; S.signedIn = false; clearData(); S.error = error.message;
+      accessToken = ''; saveToken(''); S.signedIn = false; clearData(); S.error = error.message;
     } finally { S.busy = false; render(); }
   }
 
   async function signOut() {
     try { if (API != null) await api('logout', { method: 'POST' }); }
     catch (error) { /* Local credentials are discarded even if the server is unreachable. */ }
-    accessToken = ''; S.signedIn = false; S.error = ''; S.phraseDraft = '';
+    accessToken = ''; saveToken(''); S.signedIn = false; S.error = ''; S.phraseDraft = '';
     if (API != null) clearData();
     render();
   }
@@ -403,7 +594,7 @@
     const text = document.getElementById('phrase').value.trim();
     if (!text) return;
     const person = S.person, credential = accessToken;
-    S.phraseDraft = text; S.error = ''; S.busy = true; render();
+    S.phraseDraft = text; S.error = ''; S.busy = true; S.busyAction = 'phrase'; render();
     try {
       let word;
       if (API != null) {
@@ -419,16 +610,20 @@
       }
       (DATA.words[person] ||= []).push(word);
       if (S.person === person) S.phraseDraft = '';
+      showNotice('Draft added for therapist approval');
     } catch (error) { S.error = error.message; }
-    finally { S.busy = false; render(); }
+    finally { S.busy = false; S.busyAction = ''; render(); }
   }
 
   async function approveWord(w) {
     if (API != null) {
+      if (S.busy) return;
+      S.busy = true; S.busyId = w.id; S.error = ''; render();
       try {
         const result = await api(`words/${encodeURIComponent(S.person)}/${encodeURIComponent(w.id)}/approve`, { method: 'POST' });
-        Object.assign(w, result.word); S.error = ''; render();
-      } catch (error) { S.error = error.message; render(); }
+        Object.assign(w, result.word); showNotice(`“${w.text}” approved`);
+      } catch (error) { S.error = error.message; }
+      finally { S.busy = false; S.busyId = ''; render(); }
       return;
     }
     w.status = 'approved'; render();
@@ -455,10 +650,34 @@
       }));
   }
 
-  const order = { system: 'light', light: 'dark', dark: 'system' };
-  document.getElementById('theme').addEventListener('click', () => { const cur = document.documentElement.getAttribute('data-theme') || 'system'; const n = order[cur]; if (n === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n); });
+  // Theme: white (light) by default, remembered in localStorage, respecting the user's choice.
+  // The button mirrors the patient app — a single sun/moon emoji that flips in one click.
+  const THEME_KEY = 'pl-theme';
+  const themeBtn = document.getElementById('theme');
+  function paintThemeBtn() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    themeBtn.textContent = dark ? '🌙' : '☀️';
+    themeBtn.setAttribute('aria-label', `Theme: ${dark ? 'dark' : 'light'}. Switch to ${dark ? 'light' : 'dark'}.`);
+  }
+  function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); try { window.localStorage.setItem(THEME_KEY, theme); } catch (e) {} paintThemeBtn(); }
+  (function () { let theme = 'light'; try { const saved = window.localStorage.getItem(THEME_KEY); if (saved === 'light' || saved === 'dark') theme = saved; } catch (e) {} document.documentElement.setAttribute('data-theme', theme); paintThemeBtn(); })();
+  themeBtn.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    applyTheme(cur === 'dark' ? 'light' : 'dark');  // one click flips light <-> dark
+  });
 
-  render();
+  // Restore a persisted session if a token is stored; otherwise show sign-in.
+  async function boot() {
+    if (API != null && accessToken) {
+      S.busy = true; render();
+      try { await enterConsole(); }
+      catch (error) { accessToken = ''; saveToken(''); clearData(); }
+      finally { S.busy = false; render(); }
+    } else {
+      render();
+    }
+  }
+  boot();
   </script>
 </body>
 </html>

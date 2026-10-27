@@ -192,7 +192,7 @@ class LiveDriver extends EventTarget {
         const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}&voice=true`, {
           headers: { 'X-PL-Device': this.device }, cache: 'no-store'
         });
-        if (!response.ok) throw new Error('Session request failed');
+        if (!response.ok) { const e = new Error('Session request failed'); e.status = response.status; throw e; }
         const session = await response.json();
         if (!session.voice_enabled) throw new Error('GPU voice is not enabled on this server');
         this.url = session.ws_url; this.token = session.token; this.needs = session.needs || this.needs;
@@ -290,6 +290,8 @@ class LiveDriver extends EventTarget {
   done() { this._send({ type: 'done' }); }
   rest() { this._send({ type: 'rest' }); }
   resume() { this._send({ type: 'resume' }); }
+  getSettings() { this._send({ type: 'get_settings' }); }
+  extendSettings(changes) { this._send({ type: 'extend_settings', ...changes }); }
   stop() {
     this._send({ type: 'stop' }); this.stopped = true;
     if (this.source) { this.source.onended = null; this.source.stop(); this.source = null; }
@@ -338,7 +340,7 @@ class ServerDriver extends EventTarget {
     const r = await fetch(`${this.apiBase}/api/session?person=${encodeURIComponent(this.person)}`, {
       headers: { 'X-PL-Device': this.device }, cache: 'no-store'
     });
-    if (!r.ok) throw new Error(`session request failed: ${r.status}`);
+    if (!r.ok) { const e = new Error(`session request failed: ${r.status}`); e.status = r.status; throw e; }
     const { ws_url, token } = await r.json();
     await new Promise((resolve, reject) => {
       this.ws = new WebSocket(`${ws_url}?token=${encodeURIComponent(token)}&device=${encodeURIComponent(this.device)}`);
@@ -367,6 +369,8 @@ class ServerDriver extends EventTarget {
   done() { this._send({ type: 'done' }); }
   rest() { this._send({ type: 'rest' }); }
   resume() { this._send({ type: 'resume' }); }
+  getSettings() { this._send({ type: 'get_settings' }); }
+  extendSettings(changes) { this._send({ type: 'extend_settings', ...changes }); }
   stop() { this._send({ type: 'stop' }); if (this.ws) this.ws.close(); }
 }
 
@@ -387,5 +391,8 @@ window.PLClient = {
   DemoEngine, LiveDriver, ServerDriver, PROFILES,
   mode: plMode,
   patientDeviceId, loudnessCaptureOptions,
+  // Needs backed by a seeded persona on the live server. Other needs are offline-demo only, so
+  // the patient app hides them in server/live mode rather than silently practising as Margaret.
+  remoteNeeds: Object.keys(NEED_TO_PERSON),
   isLive: () => plMode() === 'audio',
 };

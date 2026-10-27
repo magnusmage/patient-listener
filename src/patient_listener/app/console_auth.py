@@ -16,7 +16,10 @@ class ConsoleAccess:
     demo: bool = False
 
 
-def console_access(request: Request) -> ConsoleAccess:
+async def console_access(request: Request) -> ConsoleAccess:
+    # Async so FastAPI resolves it on the event loop rather than a threadpool worker. The dev
+    # SqliteStore shares one connection; keeping auth and the async endpoint bodies on the loop
+    # serializes access and avoids concurrent-cursor misuse when the console hydrates in parallel.
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token or len(token) > 256:
         raise HTTPException(401, "Sign in to the console", headers={"WWW-Authenticate": "Bearer"})
