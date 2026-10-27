@@ -1,0 +1,23 @@
+# Add to the base compose file; never expose the base cleartext service remotely.
+services:
+  postgres:
+    volumes:
+      - ${PL_PG_TLS_CERT:?Set certificate path}:/etc/postgresql/tls/server.crt:ro
+      - ${PL_PG_TLS_KEY:?Set private key path}:/etc/postgresql/tls/server.key:ro
+      - ./pg_hba.tls.conf:/etc/postgresql/pg_hba.conf:ro
+    command:
+      - postgres
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/etc/postgresql/tls/server.key
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_error_statement=panic
