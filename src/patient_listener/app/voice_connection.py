@@ -54,6 +54,7 @@ class VoiceConnection:
         self.pipeline = None
         self.input_epoch = 0
         self.decoder_epoch = 0
+        self._rest_input = False
 
     def _invoke(self, fn, *args):
         with self.runtime.gpu_lock:
@@ -81,6 +82,12 @@ class VoiceConnection:
 
     async def send(self, event):
         if self.closed: return
+        entering_rest = (event['type'] == 'restOffer' or
+                         (event['type'] == 'state' and event.get('state') == 'resting'))
+        if entering_rest or (self._rest_input and event['type'] == 'prompt'):
+            # Do not carry pre-rest speech into rest, or rest speech into practice.
+            self.invalidate_input()
+            self._rest_input = entering_rest
         if event['type'] in {'safety', 'ended'}:
             self.closed = True
             self._audio_busy(False)

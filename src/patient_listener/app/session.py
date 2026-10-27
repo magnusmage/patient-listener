@@ -97,6 +97,7 @@ class AppSession:
         self.closing = False
         self._started = False
         self._resting = False
+        self._rest_epoch = 0
         self._rest_pending_prompt = False
         self._session_limit = self.cfg.max_session_min
         self._cap: Optional[asyncio.Task] = None
@@ -143,11 +144,18 @@ class AppSession:
     async def _emit(self, events: list[Optional[dict]]) -> None:
         for ev in events:
             if ev:
+                if self._resting and not self.closing and ev['type'] not in {
+                    'safety', 'ended', 'restOffer', 'settings', 'settingsSaved'
+                } and not (ev['type'] == 'state' and ev.get('state') == 'resting'):
+                    continue
                 await self._send(ev)
 
-    async def _feed(self, event: tuple) -> list:
+    async def _feed(self, event: tuple, *, rest_epoch=None) -> list:
         """Run one engine event off the loop thread (the engine uses asyncio.run internally)."""
         async with self._engine_lock:
+            safety_input = (event[0] in ('typed', 'heard') and safetymod.check(event[1]) is not None)
+            if rest_epoch is not None and rest_epoch != self._rest_epoch and not safety_input:
+                return []  # Work queued before Rest must not run after Resume.
             task = asyncio.create_task(asyncio.to_thread(self.engine.feed, event))
             try:
                 return await asyncio.shield(task)
@@ -164,10 +172,14 @@ class AppSession:
             if event[0] not in ('typed', 'heard') or safetymod.check(event[1]) is None:
                 return []
         before = len(self.engine.replies)
-        acts = await self._feed(event)
+        epoch = self._rest_epoch
+        acts = await self._feed(event, rest_epoch=epoch)
         if self.ended or self.closing:
             return []
-        if any(isinstance(a, SafetyStop) for a in acts):
+        safety = any(isinstance(a, SafetyStop) for a in acts)
+        if (self._resting or epoch != self._rest_epoch) and not safety:
+            return []  # Suppress late normal output/advance even after a quick Resume.
+        if safety:
             self.ended = True
             self._cancel_ticker()
             self._cancel_advance()
@@ -198,8 +210,9 @@ class AppSession:
     async def next_prompt(self, *, resuming: bool = False) -> None:
         self._cancel_ticker()
         self._cancel_advance()
-        if self.ended or self.closing:
+        if self.ended or self.closing or self._resting:
             return
+        epoch = self._rest_epoch
         if self.calibrating:
             await self._calibration_prompt()
             return
@@ -212,14 +225,15 @@ class AppSession:
             payload["text"] = item.prompt
         # An automatic rest has already reserved this turn and target. Resume it
         # without incrementing the turn count or skipping the unpresented item.
-        acts = [] if resuming else await self._feed(("prompt", self.current, payload["topic"], self.now()))
-        if self.ended or self.engine.controller.state == State.SAFETY_STOP:
+        acts = [] if resuming else await self._feed(("prompt", self.current, payload["topic"], self.now()), rest_epoch=epoch)
+        if self.ended or self._resting or epoch != self._rest_epoch or self.engine.controller.state == State.SAFETY_STOP:
             return
         if any(isinstance(a, Stop) for a in acts):
             await self._finish("turn_cap")
             return
         if any(isinstance(a, OfferRest) for a in acts):
             self._resting = self._rest_pending_prompt = True
+            self._rest_epoch += 1
             await self._emit([{"type": "restOffer"}])
             return
         self._resting = self._rest_pending_prompt = False
@@ -233,22 +247,22 @@ class AppSession:
         name, data = bridge.client_message_to_event(msg)
         if self.closing and name != "stop":
             return
-        if self.calibrating and name in {'help', 'yes', 'no', 'done', 'confirm_tap',
-                                          'pause', 'speech', 'resume', 'rest', 'demo_say'}:
+        if self.calibrating and not self._resting and name in {'help', 'yes', 'no', 'done', 'confirm_tap',
+                                          'pause', 'speech', 'resume', 'demo_say'}:
             return
         if name == 'audio_settings':
             await self._audio_settings(data)
         elif name == 'calibration_skip':
             if data:
                 raise ValueError('calibration_skip takes no arguments')
-            if self.calibrating:
+            if self.calibrating and not self._resting:
                 self._loudness_skipped = True
                 self.loudness = SessionLoudness()
                 await self.next_prompt()
         elif name == 'calibration_next':
             if data:
                 raise ValueError('calibration_next takes no arguments')
-            if self.calibrating and self._audio_idle.is_set() and self.loudness.accept_phrase():
+            if not self._resting and self.calibrating and self._audio_idle.is_set() and self.loudness.accept_phrase():
                 await self.next_prompt()
         elif name == "extend_session":
             if set(data) != {"minutes"}:
@@ -284,6 +298,7 @@ class AppSession:
         elif name == "done":
             await self._run_engine(("done", self.now()))
         elif name == "rest":
+            self._rest_epoch += 1
             self._resting = True
             self._cancel_ticker()
             self._cancel_advance()
@@ -333,6 +348,10 @@ class AppSession:
             if safetymod.check(combined) is not None:
                 await self._run_engine(("typed", combined, self.now()))
                 return
+            if self._resting:
+                if text.strip().lower().strip('.!?') == 'stop':
+                    await self.stop()
+                return
             await self._emit([{"type": "caption", "who": "you", "text": text, "partial": True}])
 
     async def on_audio_final(self, text: str) -> None:
@@ -361,6 +380,12 @@ class AppSession:
 
     async def _heard(self, kind: str, text: str) -> None:
         self._cancel_ticker()
+        if self._resting:
+            if text.strip().lower().strip('.!?') == 'stop':
+                await self.stop()
+            elif safetymod.check(text) is not None:
+                await self._run_engine((kind, text, self.now()))
+            return
         if Feedback.LOUDNESS in self.cfg.feedback:
             # Safety is evaluated before calibration or feedback, including typed input.
             if safetymod.check(text) is not None:
@@ -390,13 +415,13 @@ class AppSession:
                                and values['echo_cancellation'] is values['safari'])
         if changed:
             self.loudness = SessionLoudness()
-            if self._started and Feedback.LOUDNESS in self.cfg.feedback:
+            if self._started and not self._resting and Feedback.LOUDNESS in self.cfg.feedback:
                 self._cancel_ticker()
                 self._cancel_advance()
                 # Never wait inside the socket reader: playback ACKs arrive there too.
                 async def restart():
                     await self._audio_idle.wait()
-                    if not self.ended and not self.closing:
+                    if not self.ended and not self.closing and not self._resting:
                         await self.next_prompt()
                 self._advance = asyncio.create_task(restart())
 
@@ -409,7 +434,7 @@ class AppSession:
             {'type': 'state', 'state': 'listening'}])
 
     async def on_audio_level(self, level, count):
-        if (self.ended or self.closing or not self._started or not self._audio_idle.is_set()
+        if (self.ended or self.closing or self._resting or not self._started or not self._audio_idle.is_set()
                 or Feedback.LOUDNESS not in self.cfg.feedback or not self._capture_ready
                 or self._loudness_skipped):
             return

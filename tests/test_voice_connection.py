@@ -278,3 +278,18 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(c.output.empty())
             synth.assert_not_called()
         await c.close()
+
+
+    async def test_rest_and_resume_invalidate_old_decoder_results(self):
+        c,events=self.connection()
+        c.input.put_nowait((b'xx',c.input_epoch))
+        await c.send({'type':'state','state':'resting','replace_audio':True})
+        rest_epoch=c.input_epoch
+        self.assertGreater(rest_epoch,0)
+        self.assertTrue(c.input.empty())
+        c.input.put_nowait((b'xx',rest_epoch))
+        await c.send({'type':'prompt','text':'','profile':'saving_energy'})
+        self.assertGreater(c.input_epoch,rest_epoch)
+        self.assertTrue(c.input.empty())
+        self.assertFalse(c._rest_input)
+        await c.close()
