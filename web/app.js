@@ -110,7 +110,7 @@
     on('voiceNotice', (d) => { pushCaption('listener', d.text); });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
     on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.paused = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
-    on('state', (d) => { state.ringMode = d.state; if (d.state === 'resting' && state.route === 'P3') render(); else updateRing(); });
+    on('state', (d) => { const wasPaused = state.paused; state.ringMode = d.state; if (d.state !== 'silent') state.paused = false; if ((d.state === 'resting' && state.route === 'P3') || (wasPaused && !state.paused)) render(); else updateRing(); });
     on('backchannel', (d) => { pushCaption('listener', d.caption); });
     on('offerHint', () => { state.ringMode = 'hint_offered'; pushCaption('listener', 'Want a hint?'); state.offerHint = true; show('P3'); });
     on('hint', (d) => { state.hint = d; state.offerHint = false; pushCaption('listener', d.text); show('P3'); });
@@ -241,6 +241,8 @@
   }
 
   function pushCaption(who, text) {
+    const last = state.captions.at(-1);
+    if (last && last.who === who && last.text === text) return;  // skip an identical consecutive line
     state.captions.push({ who, text });
     state.captions = state.captions.slice(-6);
     const strip = document.getElementById('pl-captions');
@@ -250,7 +252,7 @@
   function chipMode(m) { return ['speaking', 'hinting'].includes(m) ? 'speaking' : m === 'resting' ? 'resting' : 'listening'; }
   function chipWord(m) { return { listening: 'Listening — no rush', silent: 'Listening — no rush', speaking: 'Speaking', hinting: 'Speaking', hint_offered: 'Waiting for you', resting: 'Resting' }[m] || 'Listening — no rush'; }
   // While paused the chip shows a distinct status (and "start again" is how you resume).
-  function statusWord() { return state.paused ? 'Paused — tap “start again”' : chipWord(state.ringMode); }
+  function statusWord() { return state.paused ? 'Paused' : chipWord(state.ringMode); }
   function statusMode() { return state.paused ? 'resting' : chipMode(state.ringMode); }
   function updateRing() {
     const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', statusMode());
@@ -383,7 +385,7 @@
     app.append(
       h('div', { class: 'pl-screen pl-screen--center' },
         h('h1', { class: 'pl-prompt' }, `Hi, ${state.enrolledName || 'Margaret'}.`),
-        h('p', { class: 'pl-muted' }, "I'm an AI practice partner. We talk, and I wait for you."),
+        h('p', { class: 'pl-muted' }, "We talk, and I wait for you."),
         h('button', { class: 'pl-btn pl-btn--primary pl-btn--big', 'data-autofocus': '', onclick: () => show('P2') }, isLive() ? icon('mic', 24) : null, isLive() ? 'Start talking' : 'Start chatting'),
         h('button', { class: 'pl-btn pl-btn--secondary', onclick: () => { state.waits.sessionMin = 5; show('P2'); } }, 'Short chat (5 minutes)'),
         disclosure(),
