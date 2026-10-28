@@ -73,7 +73,7 @@ def prompt_payload(word: WordEntry | None, feedback: frozenset[Feedback], profil
     lead = "Say it when you are ready." if fb != "word_found" else "What is this?"
     return {
         "topic": topic,
-        "photo": f"{emoji} {word.text}" if word.kind in ("person", "place") else emoji,
+        "photo": f"{emoji} {word.text}",
         "text": lead,
         "profile": profile,
         "feedback": fb,
