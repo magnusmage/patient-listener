@@ -337,3 +337,4 @@ table.pl-grid th { background: var(--pl-caption-bg); }
 .pl-navbar .pl-theme-toggle { position: static; top: auto; right: auto; }
 .pl-github { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--pl-text); }
 .pl-github svg { display: block; }
+.pl-demo { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--pl-text); font-weight: 600; }

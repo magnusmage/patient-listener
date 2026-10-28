@@ -278,8 +278,9 @@
   function render() {
     root.innerHTML = '';
     const app = h('div', { class: state.route.startsWith('CON') ? 'pl-console' : 'pl-app' });
-    // Navbar cluster in the top-right corner. Enterprise order (left→right): GitHub, Theme, Sign out.
+    // Navbar cluster in the top-right corner. Enterprise order (left→right): Demo, GitHub, Theme, Sign out.
     const nav = h('div', { class: 'pl-navbar' });
+    nav.append(demoLink());
     nav.append(githubLink());
     nav.append(themeToggle());
     if (state.enrolled && state.route !== 'LOGIN') nav.append(logoutButton());
@@ -730,6 +731,11 @@
   }
   function logoutButton() {
     return h('button', { class: 'pl-tab pl-logout', onclick: logout, 'aria-label': 'Sign out' }, 'Sign out');
+  }
+  // Link to the offline demo (demo.html) — runs the patient app in demo mode with no server and no
+  // sign-in. Shown in the navbar on every screen so the demo is always one tap away.
+  function demoLink() {
+    return h('a', { class: 'pl-tab pl-demo', href: 'demo.html', 'aria-label': 'Open the offline demo — no sign-in or server needed' }, 'Demo');
   }
   // Link to the source repository, shown in the top-right navbar on every screen.
   const GITHUB_URL = 'https://github.com/magnusmage/patient-listener';
