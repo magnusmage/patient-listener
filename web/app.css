@@ -334,3 +334,5 @@ table.pl-grid th { background: var(--pl-caption-bg); }
 /* Patient navbar cluster (top-right): Sign out sits next to the theme toggle. */
 .pl-navbar { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; align-items: center; gap: var(--pl-space-1); }
 .pl-navbar .pl-theme-toggle { position: static; top: auto; right: auto; }
+.pl-github { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--pl-text); }
+.pl-github svg { display: block; }
