@@ -442,11 +442,10 @@
     const p = state.prompt || { topic: '', photo: '🖼️', text: 'Take your time.' };
     const profile = [...state.needs][0] || 'finding_words';
 
-    // Prompt + photo. The photo is hidden while an answer card (hint/confirm/offer/heard) is
-    // showing, so the whole turn stays in the viewport without scrolling.
-    const answering = !!(state.hint || state.confirmWord || state.offerHint || state.whatIHeard);
+    // Prompt + photo. The photo is always shown — through chat, talking, and while any
+    // answer card (hint/confirm/offer/heard) is showing — so the image is never lost.
     app.append(h('div', { class: 'pl-card' },
-      answering ? null : h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
+      h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
       h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') }),
       p.instruction ? h('p', {}, p.instruction) : null));
 
