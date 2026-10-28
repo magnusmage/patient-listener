@@ -312,7 +312,8 @@ table.pl-grid th { background: var(--pl-caption-bg); }
 .pl-cell--check { color: var(--pl-good); }
 .pl-cell--hint { color: var(--pl-warn); }
 .pl-cell--none { color: var(--pl-muted); }
-.pl-tabs { display: flex; gap: var(--pl-space-1); flex-wrap: wrap; margin-bottom: var(--pl-space-2); }
+.pl-tabs { display: flex; gap: var(--pl-space-1); flex-wrap: wrap; align-items: center; margin-bottom: var(--pl-space-2); }
+.pl-tabs > .pl-locked { flex-basis: 100%; margin-bottom: 4px; }
 .pl-tab { min-height: var(--pl-target-console); padding: 0 var(--pl-space-2); border: 2px solid var(--pl-line-strong); border-radius: var(--pl-radius-input); background: var(--pl-surface); color: var(--pl-text); cursor: pointer; font-size: var(--pl-text-console-size); }
 .pl-tab[aria-selected="true"] { border-color: var(--pl-primary); background: var(--pl-good-bg); color: var(--pl-primary); font-weight: 700; }
 

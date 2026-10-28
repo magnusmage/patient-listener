@@ -47,6 +47,7 @@
     calibrationReady: false,// Being heard: the current calibration phrase is strong enough to keep
     offerHint: false,       // a hint has been offered and is awaiting yes/no
     loudnessPosition: null, // 0..1 position on the loudness bar for the last utterance
+    paused: false,          // chat: the person tapped pause; shows a "Paused" status + "start again"
   };
 
   let client = null;
@@ -108,7 +109,7 @@
     });
     on('voiceNotice', (d) => { pushCaption('listener', d.text); });
     on('greeting', (d) => { pushCaption('listener', d.caption); });
-    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
+    on('prompt', (d) => { state.prompt = d; state.hint = null; state.confirmWord = null; state.whatIHeard = null; state.loudness = null; state.loudnessPosition = null; state.calibrationReady = false; state.paused = false; state.feedback = d.feedback || state.feedback; state.ringMode = 'listening'; show('P3'); });
     on('state', (d) => { state.ringMode = d.state; if (d.state === 'resting' && state.route === 'P3') render(); else updateRing(); });
     on('backchannel', (d) => { pushCaption('listener', d.caption); });
     on('offerHint', () => { state.ringMode = 'hint_offered'; pushCaption('listener', 'Want a hint?'); state.offerHint = true; show('P3'); });
@@ -248,9 +249,12 @@
 
   function chipMode(m) { return ['speaking', 'hinting'].includes(m) ? 'speaking' : m === 'resting' ? 'resting' : 'listening'; }
   function chipWord(m) { return { listening: 'Listening — no rush', silent: 'Listening — no rush', speaking: 'Speaking', hinting: 'Speaking', hint_offered: 'Waiting for you', resting: 'Resting' }[m] || 'Listening — no rush'; }
+  // While paused the chip shows a distinct status (and "start again" is how you resume).
+  function statusWord() { return state.paused ? 'Paused — tap “start again”' : chipWord(state.ringMode); }
+  function statusMode() { return state.paused ? 'resting' : chipMode(state.ringMode); }
   function updateRing() {
-    const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', chipMode(state.ringMode));
-    const c = document.getElementById('pl-chip'); if (c) { c.setAttribute('data-mode', chipMode(state.ringMode)); c.lastChild.textContent = chipWord(state.ringMode); }
+    const r = document.getElementById('pl-ring'); if (r) r.setAttribute('data-mode', statusMode());
+    const c = document.getElementById('pl-chip'); if (c) { c.setAttribute('data-mode', statusMode()); c.lastChild.textContent = statusWord(); }
   }
 
   function flashFound(word) {
@@ -450,8 +454,8 @@
     if (state.whatIHeard) app.append(whatIHeardCard());
 
     // State chip: a small animated dot + a plain word (no big ring, per the prototype).
-    app.append(h('div', { id: 'pl-chip', class: 'pl-chip', 'data-mode': chipMode(state.ringMode), role: 'status' },
-      h('span', { class: 'pl-chip__dot', 'aria-hidden': 'true' }), chipWord(state.ringMode)));
+    app.append(h('div', { id: 'pl-chip', class: 'pl-chip', 'data-mode': statusMode(), role: 'status' },
+      h('span', { class: 'pl-chip__dot', 'aria-hidden': 'true' }), statusWord()));
 
     // Hint area (P4)
     if (state.hint) app.append(hintCard());
@@ -531,14 +535,18 @@
   function demoControls(profile) {
     const mk = (label, fn) => h('button', { class: 'pl-tab', onclick: fn }, label);
     const row = h('div', { class: 'pl-tabs', style: 'margin-top:6px' });
-    row.append(h('span', { class: 'pl-locked' }, 'Tap to reply: '));
-    row.append(mk('pause', () => client.beginPause()));
-    if (profile !== 'words_out') row.append(mk('say the word', () => client.sayWord()));
-    if (profile === 'finding_words') row.append(mk('say a close word', () => client.saySoundAlike()));
-    if (profile === 'finding_words') row.append(mk('say something else', () => client.saySomethingElse()));
-    if (profile === 'words_out' || profile === 'being_heard' || profile === 'being_clear' || profile === 'saving_energy') row.append(mk('speak', () => client.typed(profile === 'words_out' ? 'I had a good weekend thanks' : 'hello there')));
-    if (profile === 'words_out') row.append(mk('get stuck', () => client.typed('I I I')));
-    row.append(mk('⚠ say a stroke phrase', () => client.strokePhrase()));
+    row.append(h('span', { class: 'pl-locked' }, 'Your turn — tap what you did: '));
+    // Pause is a visible hold: it shows a "Paused" status and the button flips to "start again",
+    // so the person always knows they paused and how to resume. Any other tap clears the pause.
+    const act = (fn) => () => { state.paused = false; fn(); };
+    if (state.paused) row.append(mk('start again', () => { state.paused = false; client.speech(); render(); }));
+    else row.append(mk('pause', () => { state.paused = true; pushCaption('you', 'I need a moment'); client.beginPause(); render(); }));
+    if (profile !== 'words_out') row.append(mk('I said the word', act(() => client.sayWord())));
+    if (profile === 'finding_words') row.append(mk('I said something close', act(() => client.saySoundAlike())));
+    if (profile === 'finding_words') row.append(mk('I said a different word', act(() => client.saySomethingElse())));
+    if (profile === 'words_out' || profile === 'being_heard' || profile === 'being_clear' || profile === 'saving_energy') row.append(mk(profile === 'words_out' ? 'I got my sentence out' : 'I spoke', act(() => client.typed(profile === 'words_out' ? 'I had a good weekend thanks' : 'hello there'))));
+    if (profile === 'words_out') row.append(mk('I got stuck', act(() => client.typed('I I I'))));
+    row.append(mk('⚠ say a stroke phrase', act(() => client.strokePhrase())));
     return row;
   }
 
