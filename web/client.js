@@ -126,7 +126,9 @@ class DemoEngine extends EventTarget {
   _heard(text) {
     if (this.safetyStopped) return;
     this._clear();
-    this._emit('caption', { who: 'you', text });
+    // Being loud (loudness) practises voice level, not words — it never shows a transcript of what
+    // was said, matching the server. Safety below still runs on the text regardless.
+    if (this.profile.feedback !== 'loudness') this._emit('caption', { who: 'you', text });
     if (STROKE.test(text)) { this._emit('safety', { card: 'stroke_signs', title: 'Call 999 now', body: 'Sudden changes in speech, face or arm need help now.', number: '999' }); return; }
     if (DISTRESS.test(text)) { this._emit('safety', { card: 'distress', title: 'You are not alone', body: 'If you are struggling, you can call Samaritans on 116 123.', number: '116 123' }); return; }
 
@@ -181,6 +183,7 @@ class LiveDriver extends EventTarget {
     this.person = 'margaret'; this.ws = null; this.ctx = null; this.node = null;
     this.stream = null; this.source = null; this.stopped = false; this.muted = false;
     this.audioId = null; this.needs = []; this._captureSignature = null;
+    this.ended = false;   // a terminal event was already delivered; suppress the onclose duplicate (#4)
   }
   setProfile(need) { this.person = NEED_TO_PERSON[need] || 'margaret'; this.needs = [need]; }
   async start() {
@@ -192,7 +195,7 @@ class LiveDriver extends EventTarget {
         const response = await fetch(`/api/session?person=${encodeURIComponent(this.person)}&voice=true`, {
           headers: { 'X-PL-Device': this.device }, cache: 'no-store'
         });
-        if (!response.ok) throw new Error('Session request failed');
+        if (!response.ok) { const e = new Error('Session request failed'); e.status = response.status; throw e; }
         const session = await response.json();
         if (!session.voice_enabled) throw new Error('GPU voice is not enabled on this server');
         this.url = session.ws_url; this.token = session.token; this.needs = session.needs || this.needs;
@@ -229,7 +232,8 @@ class LiveDriver extends EventTarget {
         this.ws.onclose = () => {
           reject(new Error('Voice connection closed'));
           this.stop();
-          this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+          // Don't fire a second, summary-less 'ended' if the server already sent ended/safety (#4).
+          if (!this.ended) { this.ended = true; this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } })); }
         };
       });
     } catch (error) { this.stop(); throw error; }
@@ -276,7 +280,8 @@ class LiveDriver extends EventTarget {
     }
     if (message.type === 'audioIdle') { this.audioId = null; this.mute(false); }
     if (message.type === 'voiceError') { this.stop(); return; }
-    if (message.type === 'safety' || message.type === 'ended') this.stop();
+    // Mark terminal so the forthcoming socket close doesn't overwrite this event's summary (#4).
+    if (message.type === 'safety' || message.type === 'ended') { this.ended = true; this.stop(); }
     this.dispatchEvent(new CustomEvent(message.type, { detail: message }));
   }
   _send(obj) { if (!this.stopped && this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj)); }
@@ -290,6 +295,8 @@ class LiveDriver extends EventTarget {
   done() { this._send({ type: 'done' }); }
   rest() { this._send({ type: 'rest' }); }
   resume() { this._send({ type: 'resume' }); }
+  getSettings() { this._send({ type: 'get_settings' }); }
+  extendSettings(changes) { this._send({ type: 'extend_settings', ...changes }); }
   stop() {
     this._send({ type: 'stop' }); this.stopped = true;
     if (this.source) { this.source.onended = null; this.source.stop(); this.source = null; }
@@ -307,7 +314,12 @@ class LiveDriver extends EventTarget {
  * The on-screen demo controls stay visible and map to messages the server resolves against the
  * current target, so the backend decides everything. Enabled when window.PL_API is set (the
  * patient app sets it to same-origin when served over http). */
-const NEED_TO_PERSON = { finding_words: 'margaret', words_out: 'daniyal', being_heard: 'joseph' };
+const NEED_TO_PERSON = {
+  finding_words: 'margaret',
+  words_out: 'daniyal',
+  being_heard: 'joseph',
+  saving_energy: 'demo-amina'
+};
 
 function patientDeviceId() {
   const key = 'patient-listener-device-id';
@@ -330,7 +342,7 @@ function patientDeviceId() {
 }
 
 class ServerDriver extends EventTarget {
-  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; this.device = patientDeviceId(); }
+  constructor(apiBase) { super(); this.apiBase = apiBase || ''; this.person = 'margaret'; this.ws = null; this.device = patientDeviceId(); this.ended = false; }
 
   setProfile(needKey) { this.person = NEED_TO_PERSON[needKey] || 'margaret'; }
 
@@ -338,14 +350,15 @@ class ServerDriver extends EventTarget {
     const r = await fetch(`${this.apiBase}/api/session?person=${encodeURIComponent(this.person)}`, {
       headers: { 'X-PL-Device': this.device }, cache: 'no-store'
     });
-    if (!r.ok) throw new Error(`session request failed: ${r.status}`);
+    if (!r.ok) { const e = new Error(`session request failed: ${r.status}`); e.status = r.status; throw e; }
     const { ws_url, token } = await r.json();
     await new Promise((resolve, reject) => {
       this.ws = new WebSocket(`${ws_url}?token=${encodeURIComponent(token)}&device=${encodeURIComponent(this.device)}`);
       this.ws.onopen = () => { this.ws.send(JSON.stringify({ type: 'start' })); resolve(); };
       this.ws.onerror = (e) => reject(e);
-      this.ws.onmessage = (e) => { const m = JSON.parse(e.data); this.dispatchEvent(new CustomEvent(m.type, { detail: m })); };
-      this.ws.onclose = () => this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } }));
+      this.ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'ended' || m.type === 'safety') this.ended = true; this.dispatchEvent(new CustomEvent(m.type, { detail: m })); };
+      // Don't fire a second, summary-less 'ended' if the server already sent ended/safety (#4).
+      this.ws.onclose = () => { if (!this.ended) { this.ended = true; this.dispatchEvent(new CustomEvent('ended', { detail: { reason: 'closed' } })); } };
     });
   }
 
@@ -367,6 +380,8 @@ class ServerDriver extends EventTarget {
   done() { this._send({ type: 'done' }); }
   rest() { this._send({ type: 'rest' }); }
   resume() { this._send({ type: 'resume' }); }
+  getSettings() { this._send({ type: 'get_settings' }); }
+  extendSettings(changes) { this._send({ type: 'extend_settings', ...changes }); }
   stop() { this._send({ type: 'stop' }); if (this.ws) this.ws.close(); }
 }
 
@@ -387,5 +402,8 @@ window.PLClient = {
   DemoEngine, LiveDriver, ServerDriver, PROFILES,
   mode: plMode,
   patientDeviceId, loudnessCaptureOptions,
+  // Needs backed by a seeded persona on the live server. Other needs are offline-demo only, so
+  // the patient app hides them in server/live mode rather than silently practising as Margaret.
+  remoteNeeds: Object.keys(NEED_TO_PERSON),
   isLive: () => plMode() === 'audio',
 };
