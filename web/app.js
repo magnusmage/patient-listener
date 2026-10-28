@@ -437,6 +437,13 @@
     } else { client.start(); state.sessionActive = false; }
   }
 
+  // The backend sends the photo field as "emoji + word" (e.g. "🌳 garden"). We show only the
+  // emoji in the photo box, dropping the trailing word. Falls back to 🖼️ when nothing is sent.
+  function promptEmoji(photo) {
+    const emoji = photo ? String(photo).trim().split(/\s+/)[0] : '';
+    return emoji || '🖼️';
+  }
+
   // ---- P3 / P3b: talk ----
   function screenP3(app) {
     app.append(topbar());
@@ -446,7 +453,7 @@
     // Prompt + photo. The photo is always shown — through chat, talking, and while any
     // answer card (hint/confirm/offer/heard) is showing — so the image is never lost.
     app.append(h('div', { class: 'pl-card' },
-      h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, p.photo || '🖼️'),
+      h('div', { class: 'pl-photo', 'aria-hidden': 'true' }, promptEmoji(p.photo)),
       h('p', { class: 'pl-prompt', html: (p.text || 'Take your time.') }),
       p.instruction ? h('p', {}, p.instruction) : null));
 
