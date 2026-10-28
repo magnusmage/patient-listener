@@ -7,7 +7,7 @@ license = { text = "MIT" }
 readme = "README.md"
 # Real scheduling, matching and pronunciation libraries also run offline.
 dependencies = ["fsrs==6.3.2", "rapidfuzz==3.14.6", "jellyfish==1.2.1",
-                "nltk==3.10.3", "epitran==1.35.2"]
+                "nltk==3.10.3", "epitran==1.35.2", "emoji==2.16.0"]
 
 [project.optional-dependencies]
 # CPU-only framework integration tests; voice adds the GPU model dependencies.

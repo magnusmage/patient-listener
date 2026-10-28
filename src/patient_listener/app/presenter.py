@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from .word_emoji import KIND_EMOJI, word_emoji
 from ..schemas import WordEntry
 from ..types import Feedback
 from ..voice import safety as safetymod
@@ -21,17 +22,6 @@ __all__ = [
     "close_variant",
     "STROKE_PHRASE",
 ]
-
-# A friendly stand-in picture per word kind (the frontend shows an emoji placeholder; real
-# photos are a person's own, uploaded by a carer, and never shipped in the repo).
-KIND_EMOJI = {
-    "person": "👤",
-    "place": "📍",
-    "food": "🍽️",
-    "object": "🧺",
-    "activity": "🎯",
-    "phrase": "💬",
-}
 
 STROKE_PHRASE = "my arm feels funny and words are worse today"
 
@@ -68,12 +58,12 @@ def prompt_payload(word: WordEntry | None, feedback: frozenset[Feedback], profil
             "profile": profile,
             "feedback": fb,
         }
-    emoji = KIND_EMOJI.get(word.kind, "🖼️")
-    topic = f"photo: {word.meaning_cue}" if word.meaning_cue else f"photo: {word.text}"
+    emoji = word_emoji(word.text, word.kind)
+    topic = f"photo: {word.meaning_cue}" if word.meaning_cue else "Look at the picture."
     lead = "Say it when you are ready." if fb != "word_found" else "What is this?"
     return {
         "topic": topic,
-        "photo": f"{emoji} {word.text}",
+        "photo": emoji,
         "text": lead,
         "profile": profile,
         "feedback": fb,
