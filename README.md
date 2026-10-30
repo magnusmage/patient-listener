@@ -96,30 +96,7 @@ These are implementation capabilities, not clinical effectiveness claims or a cl
 
 ### CPU/GPU deployment architecture
 
-```mermaid
-flowchart LR
-    Browser[Patient or helper browser]
-    subgraph CPU[CPU server]
-        Proxy[Nginx HTTPS and WSS]
-        API[FastAPI and static frontend]
-        DB[(PostgreSQL)]
-        Proxy --> API
-        API --> DB
-    end
-    subgraph GPU[GPU machine]
-        Voice[Pipecat voice application]
-        ASR[NeMo Nemotron ASR]
-        TTS[Magpie TTS]
-        Voice --> ASR
-        Voice --> TTS
-    end
-    TF[Nebius Token Factory]
-    Browser -->|HTTPS or WSS| Proxy
-    Proxy -->|CPU-to-GPU upstream| Voice
-    Voice -->|Shared database access| DB
-    API -->|Super hint generation| TF
-    Voice -->|Lightning replies and completeness checks| TF
-```
+![Patient Listener architecture: browser, CPU API and PostgreSQL, GPU voice and speech models, and Nebius Token Factory](docs/images/deployment-architecture.svg)
 
 Nginx, the frontend/API and PostgreSQL run on the CPU server. The GPU runs the voice application and models. Both public domains point to the CPU server: website requests reach the API, while voice requests are proxied to the GPU. Both application services use the same PostgreSQL database, matching signing/service secrets and the same audio settings.
 

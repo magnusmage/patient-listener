@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1600" viewBox="0 0 960 1600" role="img" aria-labelledby="title description">
+  <title id="title">Patient Listener CPU and GPU deployment architecture</title>
+  <desc id="description">A patient or helper browser connects over HTTPS and WSS to Nginx on the CPU server. Nginx routes website requests to FastAPI and voice traffic to the GPU's Pipecat voice application. FastAPI and the voice application share PostgreSQL on the CPU. The GPU runs Nemotron speech recognition and Magpie speech generation. The CPU API calls Nemotron Super for optional hint preparation, and the GPU voice application calls Nemotron Lightning for optional live replies and completeness checks through Nebius Token Factory.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#101d29"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 Z" fill="#68ddc4"/>
+    </marker>
+    <marker id="data-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 Z" fill="#7cbaff"/>
+    </marker>
+    <marker id="model-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 1 1 L 9 5 L 1 9 Z" fill="#c8a7ff"/>
+    </marker>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; }
+      .heading { fill: #eff7ff; font-size: 29px; font-weight: 700; }
+      .section { fill: #eef7ff; font-size: 26px; font-weight: 650; }
+      .label { fill: #edf7ff; font-size: 23px; font-weight: 650; text-anchor: middle; }
+      .detail { fill: #b9cadb; font-size: 18px; text-anchor: middle; }
+      .small { fill: #b9cadb; font-size: 17px; }
+      .flow { fill: none; stroke: #68ddc4; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .data { fill: none; stroke: #7cbaff; stroke-width: 3; stroke-dasharray: 8 7; stroke-linejoin: round; marker-start: url(#data-arrow); marker-end: url(#data-arrow); }
+      .model { fill: none; stroke: #c8a7ff; stroke-width: 2.5; stroke-linejoin: round; marker-end: url(#model-arrow); }
+    </style>
+  </defs>
+
+  <rect x="1" y="1" width="958" height="1598" rx="28" fill="url(#background)" stroke="#2b4054"/>
+  <text x="480" y="58" text-anchor="middle" class="heading">CPU / GPU deployment architecture</text>
+
+  <!-- Group backgrounds keep the main deployment vertically stacked. -->
+  <rect x="180" y="280" width="600" height="390" rx="22" fill="#142837" stroke="#3d766f" stroke-width="1.5"/>
+  <text x="214" y="319" class="section">CPU server</text>
+  <text x="214" y="343" class="small">Website, console and database</text>
+
+  <rect x="180" y="815" width="600" height="350" rx="22" fill="#17263e" stroke="#4d75a5" stroke-width="1.5"/>
+  <text x="214" y="855" class="section">GPU machine</text>
+  <text x="214" y="879" class="small">Voice sessions and local speech models</text>
+
+  <rect x="180" y="1290" width="600" height="200" rx="22" fill="#29223d" stroke="#8e72ba" stroke-width="1.5"/>
+  <text x="214" y="1332" class="section">Nebius Token Factory</text>
+  <text x="214" y="1357" class="small">Hosted text inference · optional AI calls</text>
+
+  <!-- Browser / API / GPU routes. -->
+  <path class="flow" marker-start="url(#arrow)" d="M480 190 V365"/>
+  <text x="507" y="236" fill="#9fe8d8" font-size="19">HTTPS / WSS</text>
+  <path class="flow" d="M480 445 V466 H337 V495"/>
+  <text x="217" y="478" fill="#9fe8d8" font-size="17">Website / API</text>
+  <path class="flow" marker-start="url(#arrow)" d="M630 405 H850 V940 H695"/>
+  <rect x="810" y="747" width="120" height="59" rx="12" fill="#0d1927" stroke="#355653"/>
+  <text x="870" y="772" text-anchor="middle" fill="#9fe8d8" font-size="16">Voice stream</text>
+  <text x="870" y="794" text-anchor="middle" fill="#9fe8d8" font-size="16">and controls</text>
+
+  <path class="data" d="M460 545 H510"/>
+  <path class="data" d="M695 965 H805 V715 H627 V595"/>
+  <text x="592" y="744" text-anchor="middle" fill="#a4ceff" font-size="19">Shared practice records</text>
+
+  <!-- Model requests take separate outer lanes, away from the main flow. -->
+  <path class="model" d="M215 545 H105 V1535 H627 V1460"/>
+  <path class="model" d="M265 940 H155 V1415 H215"/>
+  <rect x="279" y="1518" width="402" height="34" rx="10" fill="#10192a"/>
+  <text x="480" y="1541" text-anchor="middle" fill="#d8c2ff" font-size="18">CPU API → Super for hint preparation</text>
+
+  <!-- Application nodes. -->
+  <rect x="300" y="100" width="360" height="90" rx="18" fill="#183a3b" stroke="#68ddc4" stroke-width="2"/>
+  <text x="480" y="138" class="label">Patient or helper browser</text>
+  <text x="480" y="166" class="detail">Microphone, controls and playback</text>
+
+  <rect x="330" y="365" width="300" height="80" rx="15" fill="#1b3f42" stroke="#68ddc4" stroke-width="1.5"/>
+  <text x="480" y="399" class="label">Nginx</text>
+  <text x="480" y="426" class="detail">Public HTTPS / WSS ingress</text>
+
+  <rect x="215" y="495" width="245" height="100" rx="15" fill="#1b3548" stroke="#538aa1"/>
+  <text x="337" y="535" class="label">FastAPI</text>
+  <text x="337" y="563" class="detail">Frontend + console + API</text>
+
+  <rect x="510" y="495" width="235" height="100" rx="15" fill="#1a3349" stroke="#7cbaff" stroke-width="1.5"/>
+  <text x="627" y="535" class="label">PostgreSQL</text>
+  <text x="627" y="563" class="detail">Plans, access and results</text>
+
+  <rect x="265" y="895" width="430" height="90" rx="16" fill="#1b3a54" stroke="#7cbaff" stroke-width="1.5"/>
+  <text x="480" y="932" class="label">Pipecat voice application</text>
+  <text x="480" y="960" class="detail">Timing, hints, matching and control</text>
+
+  <path class="flow" d="M480 985 V1010 H337 V1040"/>
+  <path class="flow" d="M480 985 V1010 H627 V1040"/>
+  <rect x="215" y="1040" width="245" height="86" rx="15" fill="#21344d" stroke="#6f97c7"/>
+  <text x="337" y="1075" class="label">Nemotron ASR</text>
+  <text x="337" y="1103" class="detail">Audio → transcript</text>
+  <rect x="510" y="1040" width="235" height="86" rx="15" fill="#21344d" stroke="#6f97c7"/>
+  <text x="627" y="1075" class="label">Magpie TTS</text>
+  <text x="627" y="1103" class="detail">Text → spoken audio</text>
+
+  <rect x="215" y="1370" width="245" height="90" rx="15" fill="#382d50" stroke="#bb96f0"/>
+  <text x="337" y="1405" class="label">Nemotron Lightning</text>
+  <text x="337" y="1433" class="detail">Replies / completeness</text>
+  <rect x="510" y="1370" width="235" height="90" rx="15" fill="#382d50" stroke="#bb96f0"/>
+  <text x="627" y="1405" class="label">Nemotron Super</text>
+  <text x="627" y="1433" class="detail">CPU API: meaning hints</text>
+
+  <text x="480" y="1580" text-anchor="middle" class="small">Local GPU speech · shared PostgreSQL · hosted text inference</text>
+</svg>
