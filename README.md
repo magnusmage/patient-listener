@@ -16,6 +16,8 @@ Built for the Nebius × NVIDIA Global AI Hackathon. This is a practice partner, 
 
 ## Demo Previews
 
+**[Watch the public demo video on YouTube](https://youtu.be/rpJwb4DllFM)**
+
 ### Patient practice
 
 ![Patient practice walkthrough](docs/images/patient-practice.gif)
@@ -41,11 +43,29 @@ Patient Listener is deployed with the frontend/API, PostgreSQL and Nginx on a Li
 | Therapist/carer console | https://patientlistener.magnusmage.com/console.html |
 | Voice WebSocket endpoint | `wss://voice.patientlistener.magnusmage.com/ws` |
 
-Use the permanent HTTPS links above. A therapist/carer access token is supplied privately by the project team or with the submission's testing instructions; credentials are not published in the repository. Live practice requires microphone permission and an enrolled browser/device.
+Use the permanent HTTPS links above. Live practice requires microphone permission and an enrolled browser/device.
+
+### Demo console access
+
+Open the [therapist/carer console](https://patientlistener.magnusmage.com/console.html) and paste the token for the role you want to test.
+
+**Therapist access token:**
+
+```text
+plconsole_p_GfG_ZsAgGo3lgw-XWGGWEnf6j2RrByu3sFI5wEPjQ
+```
+
+**Carer access token:**
+
+```text
+plconsole_xI-Aqne8Y1tA5DrLgJNRD7XY1XU15ccUNH_IfIrq9K8
+```
+
+These demo access tokens are intentionally public and grant the relevant helper permissions for their linked patients; they are not read-only credentials. Use fictional demo data only. They are console credentials, not Nebius API keys or patient device setup codes.
 
 ### A short test session
 
-1. Open the therapist console and sign in with the supplied token.
+1. Open the therapist console and sign in with the therapist demo token above.
 2. Select a linked patient and open their caseload.
 3. Open **Devices** and generate a device setup code.
 4. Open the patient demo in the browser/device being enrolled, enter the code and allow microphone access.
